@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark light">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; img-src 'self' data:; media-src 'none'; object-src 'none'; frame-src 'none'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'none'; worker-src 'none'">
+    <title>Query Cartographer</title>
+    <link rel="stylesheet" href="./src/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">QC</span>
+          <div>
+            <h1>Query Cartographer</h1>
+            <p id="analysis-status">Local SQL cockpit ready</p>
+          </div>
+        </div>
+        <nav class="toolbar" aria-label="Workspace actions">
+          <button id="sample-button" data-testid="sample-button" type="button">Demo model</button>
+          <button id="analyze-button" data-testid="analyze-button" type="button" class="primary">Analyze</button>
+          <button id="undo-button" class="icon-button" type="button" aria-label="Undo edit" title="Undo edit">&#8630;</button>
+          <button id="redo-button" class="icon-button" type="button" aria-label="Redo edit" title="Redo edit">&#8631;</button>
+          <details class="utility-menu">
+            <summary aria-label="More workspace actions" title="More workspace actions">&#8230;</summary>
+            <div class="utility-menu-popover">
+              <button id="export-button" data-testid="export-button" type="button">Download Markdown</button>
+              <button id="export-json-button" data-testid="export-json-button" type="button">Download JSON</button>
+              <button id="theme-button" type="button" aria-pressed="false">Use light theme</button>
+              <button id="clear-button" data-testid="clear-button" type="button" class="ghost">Reset workspace</button>
+            </div>
+          </details>
+        </nav>
+      </header>
+
+      <main class="workspace cockpit-grid">
+        <section class="editor-region" aria-label="SQL workspace">
+          <div class="panel editor-workbench">
+            <div class="editor-tabbar" role="tablist" aria-label="SQL workbench views">
+              <button id="editor-tab-source" type="button" role="tab" data-editor-view="source" aria-controls="editor-source" aria-selected="false">
+                Source <output id="query-size">0 lines</output>
+              </button>
+              <button id="editor-tab-lens" type="button" role="tab" data-editor-view="lens" aria-controls="editor-lens" aria-selected="true">
+                Query Lens <output id="lens-caption">Formatted and numbered</output>
+              </button>
+              <button id="editor-tab-schema" type="button" role="tab" data-editor-view="schema" aria-controls="editor-schema" aria-selected="false">
+                Schema <output id="schema-size">0 tables</output>
+              </button>
+            </div>
+
+            <section id="editor-source" class="editor-view raw-panel" role="tabpanel" aria-labelledby="editor-tab-source" hidden>
+              <div class="editor-contextline">
+                <span>SQL source</span>
+                <span>Local only / network disabled</span>
+              </div>
+              <textarea id="sql-input" data-testid="sql-input" spellcheck="false" autocomplete="off" aria-label="Paste SQL query" placeholder="Paste SQL here"></textarea>
+            </section>
+
+            <section id="editor-lens" class="editor-view lens-panel active" role="tabpanel" aria-labelledby="editor-tab-lens">
+              <div class="lens-ide" data-testid="query-lens-ide">
+                <div id="lens-overview" class="lens-overview" aria-live="polite"></div>
+                <div class="lens-editor-shell">
+                  <pre id="formatted-output" data-testid="formatted-output" class="formatted-output query-lens" tabindex="0"></pre>
+                  <div id="lens-minimap" class="lens-minimap" aria-label="Query lens minimap"></div>
+                </div>
+              </div>
+            </section>
+
+            <section id="editor-schema" class="editor-view schema-drawer" role="tabpanel" aria-labelledby="editor-tab-schema" hidden>
+              <div class="editor-contextline">
+                <span>Optional schema context</span>
+                <span>DDL, row counts, indexes, sensitive fields</span>
+              </div>
+              <textarea id="schema-input" data-testid="schema-input" spellcheck="false" autocomplete="off" aria-label="Schema notes, row counts, indexes, and sensitive fields"></textarea>
+            </section>
+          </div>
+        </section>
+
+        <div id="workspace-resizer" class="workspace-resizer" role="separator" aria-label="Resize SQL workbench" aria-orientation="vertical" tabindex="0"></div>
+
+        <section class="analysis-region" aria-label="SQL analysis cockpit">
+          <section id="workspace-empty" data-testid="workspace-empty" class="workspace-empty" aria-label="Ready for SQL" hidden>
+            <div class="workspace-empty-copy">
+              <span class="workspace-empty-kicker">Local analysis ready</span>
+              <h2>Turn the model into a map.</h2>
+              <p>Paste SQL on the left. The query stays in this browser.</p>
+            </div>
+            <div class="workspace-empty-pipeline" aria-label="Analysis path">
+              <span><b>01</b> Source</span>
+              <i aria-hidden="true"></i>
+              <span><b>02</b> Logic</span>
+              <i aria-hidden="true"></i>
+              <span><b>03</b> Motion</span>
+              <i aria-hidden="true"></i>
+              <span><b>04</b> Contract</span>
+              <i aria-hidden="true"></i>
+              <span><b>05</b> Decision</span>
+            </div>
+            <div class="workspace-empty-trust" aria-label="Local analysis guarantees">
+              <span>Static browser app</span>
+              <span>No database connection</span>
+              <span>No telemetry</span>
+            </div>
+          </section>
+          <div class="summary-grid" id="summary-grid" data-testid="summary-grid" aria-live="polite"></div>
+          <div id="focus-strip" data-testid="focus-strip" class="focus-strip" aria-live="polite">
+            <div id="perspective-switch" class="perspective-switch" role="tablist" aria-label="Atlas perspective"></div>
+            <aside id="briefing-board" data-testid="briefing-board" class="briefing-board" aria-live="polite"></aside>
+          </div>
+
+          <div class="modebar" role="tablist" aria-label="Analysis modes">
+            <button id="tab-atlas" type="button" role="tab" aria-controls="view-atlas" aria-selected="true">Atlas</button>
+            <button id="tab-fix" type="button" role="tab" aria-controls="view-fix" aria-selected="false">Repair</button>
+            <button id="tab-inspect" type="button" role="tab" aria-controls="view-inspect" aria-selected="false">Evidence</button>
+          </div>
+
+          <section id="view-atlas" class="view active" role="tabpanel" aria-labelledby="tab-atlas">
+            <div class="panel atlas-panel">
+              <div class="panel-header">
+                <div class="atlas-title">
+                  <h2>Data Motion Atlas</h2>
+                  <output id="theater-caption">No projection</output>
+                </div>
+                <div class="panel-actions atlas-actions">
+                  <label class="atlas-layer-control" for="atlas-layer-select">
+                    <span>Layer</span>
+                    <select id="atlas-layer-select" aria-label="Atlas layer">
+                      <option value="motion">Data motion</option>
+                      <option value="lineage">Lineage</option>
+                      <option value="risk">Risk</option>
+                      <option value="metrics">Metrics</option>
+                      <option value="grain">Grain</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <div id="theater-stage" data-testid="theater-stage" class="theater-stage atlas-stage">
+                <div class="atlas-canvas-wrap">
+                  <canvas id="theater-canvas" data-testid="theater-canvas" role="img" aria-label="Interactive SQL lineage and data-motion atlas"></canvas>
+                  <aside id="atlas-evidence-popover" data-testid="atlas-evidence-popover" class="atlas-evidence-popover" role="region" aria-label="Selected Atlas evidence" aria-live="polite" hidden></aside>
+                  <details id="atlas-navigator" data-testid="atlas-navigator" class="atlas-navigator" aria-live="polite"></details>
+                  <details id="atlas-filters" class="atlas-filters">
+                    <summary>Visibility <span id="atlas-visible-count">5/5</span></summary>
+                    <div class="atlas-filter-menu" aria-label="Atlas item filters">
+                      <label><input type="checkbox" data-atlas-filter="sources" checked> Sources</label>
+                      <label><input type="checkbox" data-atlas-filter="joins" checked> Joins</label>
+                      <label><input type="checkbox" data-atlas-filter="filters" checked> Filters</label>
+                      <label><input type="checkbox" data-atlas-filter="grain" checked> Grain</label>
+                      <label><input type="checkbox" data-atlas-filter="select" checked> Select</label>
+                    </div>
+                  </details>
+                </div>
+                <aside id="inspect-board" data-testid="inspect-board" class="inspect-board" aria-live="polite"></aside>
+              </div>
+              <div id="flow-list" class="flow-list motion-ribbon"></div>
+            </div>
+          </section>
+
+          <section id="view-fix" class="view" role="tabpanel" aria-labelledby="tab-fix" hidden>
+            <div class="panel fix-panel">
+              <div class="panel-header">
+                <h2>Repair Deck</h2>
+                <div class="panel-actions">
+                  <output id="flight-caption">No maneuvers</output>
+                  <button id="copy-flight-button" type="button">Copy Draft</button>
+                </div>
+              </div>
+              <div class="flight-cockpit">
+                <div class="flight-left">
+                  <div id="flight-impact" data-testid="flight-impact" class="flight-impact"></div>
+                  <div id="flight-actions" data-testid="flight-actions" class="flight-actions"></div>
+                </div>
+                <pre id="flight-draft" data-testid="flight-draft" class="flight-draft" tabindex="0"></pre>
+              </div>
+            </div>
+          </section>
+
+          <section id="view-inspect" class="view" role="tabpanel" aria-labelledby="tab-inspect" hidden>
+            <div class="inspect-workbench">
+              <div class="panel diagnostics-panel">
+                <div class="panel-header">
+                  <h2>Diagnostics</h2>
+                  <output id="findings-caption">0 findings</output>
+                </div>
+                <div id="findings-list" class="findings-list"></div>
+              </div>
+              <div class="panel trace-panel">
+                <div class="panel-header">
+                  <h2>Semantic Trace</h2>
+                  <output id="trace-caption">No registry entries</output>
+                </div>
+                <div id="trace-list" data-testid="trace-list" class="trace-list"></div>
+              </div>
+            </div>
+          </section>
+
+          <div class="sr-only" aria-hidden="true">
+            <output id="briefing-caption">Waiting for SQL</output>
+            <output id="map-caption">No query analyzed</output>
+            <button id="theater-toggle-button" type="button">Expand</button>
+            <strong id="theater-node-label">Result</strong>
+            <strong id="theater-node-line">derived</strong>
+            <strong id="theater-node-risk">info</strong>
+            <div id="lineage-map" data-testid="lineage-map" class="lineage-map"></div>
+            <output id="flow-caption">Waiting for SQL</output>
+            <pre id="rewrite-output" tabindex="0"></pre>
+            <div id="rewrite-notes" class="rewrite-notes"></div>
+            <button id="copy-formatted-button" type="button">Copy SQL</button>
+            <button id="copy-rewrite-button" type="button">Copy SQL</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

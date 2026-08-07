@@ -1,0 +1,143 @@
+{
+  "schemaVersion": "query-cartographer.pages-manifest.v1",
+  "sourceRepository": "FlorianStuettgen/query-cartographer",
+  "sourceCommit": "212df53c5837d19e9992aef388994e279615b52c",
+  "basePath": "/query-cartographer-pages/",
+  "files": [
+    {
+      "path": ".nojekyll",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1094,
+      "sha256": "bcc33cecac4bbb3aa28b8edc23e3e29f8498b8a67b2706a44f88460a1b08c899"
+    },
+    {
+      "path": "index.html",
+      "bytes": 12910,
+      "sha256": "99c39b94c6ad7f9da35dd6103f4ed71da7741b12842bf8ff8f004450f31c9aac"
+    },
+    {
+      "path": "src/app.js",
+      "bytes": 74628,
+      "sha256": "6aef6cd714c5f979c8c815d54ead65b67ba3e7062ae41cd4938c308b50dc63f6"
+    },
+    {
+      "path": "src/export/browserExport.js",
+      "bytes": 8564,
+      "sha256": "c97a1aa7886bca69757aedf982c16dbb341ec0d9ade9cbb52ad4b8bcf0d14b07"
+    },
+    {
+      "path": "src/export/canonicalJson.js",
+      "bytes": 5428,
+      "sha256": "9d9645b167a227e3b7f24e7262d7f3c89cd5256a1a1f214bda7bef15c86e9f54"
+    },
+    {
+      "path": "src/export/exportContract.js",
+      "bytes": 29576,
+      "sha256": "84ad31965945fc29fc0f497b2d4546a47f7984c3b40fdf9889e52aab874eb043"
+    },
+    {
+      "path": "src/export/markdownContract.js",
+      "bytes": 12187,
+      "sha256": "486e6c5acba71206f2319bcaf0d9ad29feda2f8130c71795fdce59f4a11e4227"
+    },
+    {
+      "path": "src/sql/analyzer.js",
+      "bytes": 3988,
+      "sha256": "757df2388aff05aba5ce57bbfb2ae8fe31ab577d3987dd45fbb392c6e8581652"
+    },
+    {
+      "path": "src/sql/briefing.js",
+      "bytes": 6130,
+      "sha256": "4f0d042b4e92f8f206d94c7f2e195323a8f3c99dba121154d133c09eaa35582e"
+    },
+    {
+      "path": "src/sql/demoModel.js",
+      "bytes": 2220,
+      "sha256": "3db7160bebf3ed02ee200c17bde5d5548ecc946077bed36647f6e2549d871ae5"
+    },
+    {
+      "path": "src/sql/diagnostics.js",
+      "bytes": 32204,
+      "sha256": "d4d705409f32138dc6f14dddaf87a38255ca7cbea004788d40e55f44c773c30c"
+    },
+    {
+      "path": "src/sql/dialects.js",
+      "bytes": 21480,
+      "sha256": "e7d875898b844bbaceb64386e481c024eedac5e06d8b660d07c02689c6879eed"
+    },
+    {
+      "path": "src/sql/flightPlan.js",
+      "bytes": 13456,
+      "sha256": "b0cad18eb1274366375073dea3e974f762be53cd2e4bb499f318d9bee28cd618"
+    },
+    {
+      "path": "src/sql/flow.js",
+      "bytes": 7252,
+      "sha256": "92c34ce45653e0e626c46693596b9b7a365eeee9e21b99074fe499c776b7769d"
+    },
+    {
+      "path": "src/sql/formatter.js",
+      "bytes": 3191,
+      "sha256": "29dcdb898aad198cbe69cc006b8a6efb3cc0646e203b7b8d3dbc6e10c21625b6"
+    },
+    {
+      "path": "src/sql/identity.js",
+      "bytes": 6705,
+      "sha256": "b314a9619fadc342bcc62bfbe28bc9e4ad419a9abe100efa7305486cede04e16"
+    },
+    {
+      "path": "src/sql/parser.js",
+      "bytes": 16743,
+      "sha256": "3d4f20c5eab579ef58a95448dec277ec30381d2209d77ab6379605d76f6bd0be"
+    },
+    {
+      "path": "src/sql/reviewProfile.js",
+      "bytes": 24001,
+      "sha256": "e72361074aacb4584eae421efa612b10599f0969b25051b9303c572ad1171833"
+    },
+    {
+      "path": "src/sql/rewrites.js",
+      "bytes": 6697,
+      "sha256": "75844fca9086343d79bd9a0b5a7c5e64b9b43be6bf2374b32d4f67ad6c03c8f2"
+    },
+    {
+      "path": "src/sql/schema.js",
+      "bytes": 7561,
+      "sha256": "0700ebc4d865548493830e5fe0b54d43770e361e9db7dc0f3db9fc8482e6a85d"
+    },
+    {
+      "path": "src/sql/sourceModel.js",
+      "bytes": 18149,
+      "sha256": "f70e91a59e089306be3ede6679447361ceaff4f03d19424a2a2fd5b3bd8e807d"
+    },
+    {
+      "path": "src/sql/tokenizer.js",
+      "bytes": 8288,
+      "sha256": "49d427ef185028de80cfa02716dbaef0b0b6be4d8c969216e631b08fdf25e9b2"
+    },
+    {
+      "path": "src/styles.css",
+      "bytes": 58455,
+      "sha256": "af288b2f26945b2cbafc5d1fced55341a6ce3afa56ce2225565a2d454485e392"
+    },
+    {
+      "path": "src/ui/diagram.js",
+      "bytes": 6512,
+      "sha256": "323094f13af5b62c02b75a3ef219eee27da81ed661d2ef794c6990f4bbc0210d"
+    },
+    {
+      "path": "src/ui/theater.js",
+      "bytes": 28491,
+      "sha256": "154aee323b4ed48c6a7cdd5f1996c24d12652f156eff0b388d6414376a24db27"
+    },
+    {
+      "path": "src/ui/trace.js",
+      "bytes": 3066,
+      "sha256": "7355f752b9ed7bdf5c2211dd485c26d73c6d138c63e8c69781a2ad1be6033fa0"
+    }
+  ]
+}
