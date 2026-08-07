@@ -1,0 +1,257 @@
+name: Deploy audited Query Cartographer Pages bundle
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages-production
+  cancel-in-progress: false
+
+jobs:
+  source-verify:
+    name: Verify source bundle and project-path browser workflow
+    if: >-
+      github.repository == 'FlorianStuettgen/query-cartographer' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      PAGES_BASE_PATH: /query-cartographer-pages/
+
+    steps:
+      - name: Check out the exact source main SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Set up the committed Node.js toolchain
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Install dependencies from the frozen lockfile
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Install pinned Chromium and Linux dependencies
+        run: corepack pnpm exec playwright install --with-deps chromium
+
+      - name: Run complete clean-checkout verification
+        run: npm run workspace:verify-clean
+
+      - name: Build the deterministic allowlisted Pages bundle
+        run: npm run pages:build
+
+      - name: Verify the Pages bundle and manifest
+        run: npm run pages:check
+
+      - name: Run the real workbench beneath the Pages project path
+        run: npm run pages:test
+
+  deploy:
+    name: Validate and deploy the audited bundle
+    if: >-
+      github.repository == 'FlorianStuettgen/query-cartographer-pages' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      statuses: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Check out the exact deployment main SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Set up the recorded Node.js toolchain
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.11.0
+
+      - name: Verify exact checkout and allowlisted site manifest
+        id: bundle
+        shell: bash
+        env:
+          EXPECTED_DEPLOYMENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_DEPLOYMENT_SHA"
+          node <<'NODE'
+          const assert = require("node:assert/strict");
+          const { createHash } = require("node:crypto");
+          const { appendFileSync, lstatSync, readFileSync, readdirSync } = require("node:fs");
+          const path = require("node:path");
+
+          const siteRoot = path.resolve("site");
+          const manifestName = "runtime-manifest.json";
+          const checksumsName = "SHA256SUMS";
+          const manifest = JSON.parse(readFileSync(path.join(siteRoot, manifestName), "utf8"));
+          const expectedManifestPaths = [
+            ".nojekyll",
+            "LICENSE",
+            "index.html",
+            "src/app.js",
+            "src/export/browserExport.js",
+            "src/export/canonicalJson.js",
+            "src/export/exportContract.js",
+            "src/export/markdownContract.js",
+            "src/sql/analyzer.js",
+            "src/sql/briefing.js",
+            "src/sql/demoModel.js",
+            "src/sql/diagnostics.js",
+            "src/sql/dialects.js",
+            "src/sql/flightPlan.js",
+            "src/sql/flow.js",
+            "src/sql/formatter.js",
+            "src/sql/identity.js",
+            "src/sql/parser.js",
+            "src/sql/reviewProfile.js",
+            "src/sql/rewrites.js",
+            "src/sql/schema.js",
+            "src/sql/sourceModel.js",
+            "src/sql/tokenizer.js",
+            "src/styles.css",
+            "src/ui/diagram.js",
+            "src/ui/theater.js",
+            "src/ui/trace.js"
+          ];
+
+          assert.deepEqual(Object.keys(manifest).sort(), ["basePath", "files", "schemaVersion", "sourceCommit", "sourceRepository"]);
+          assert.equal(manifest.schemaVersion, "query-cartographer.pages-manifest.v1");
+          assert.equal(manifest.sourceRepository, "FlorianStuettgen/query-cartographer");
+          assert.match(manifest.sourceCommit, /^[0-9a-f]{40}$/);
+          assert.equal(manifest.basePath, "/query-cartographer-pages/");
+          assert.ok(Array.isArray(manifest.files));
+
+          const normalize = (value) => value.split(path.sep).join("/");
+          const walk = (directory, prefix = "") => readdirSync(directory, { withFileTypes: true })
+            .flatMap((entry) => {
+              const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+              if (entry.isDirectory()) return walk(path.join(directory, entry.name), relative);
+              assert.equal(entry.isFile(), true, `Non-file bundle entry: ${relative}`);
+              return [normalize(relative)];
+            })
+            .sort();
+          const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+          const validateRelativePath = (relative) => {
+            assert.equal(typeof relative, "string");
+            assert.ok(relative.length > 0);
+            assert.equal(relative, normalize(relative));
+            assert.equal(path.posix.isAbsolute(relative), false);
+            assert.equal(relative.includes("\\"), false);
+            assert.equal(path.posix.normalize(relative), relative);
+            assert.equal(relative.split("/").some((part) => part === "." || part === ".." || part === ""), false);
+            assert.doesNotMatch(relative, /[\u0000-\u001f\u007f]/);
+          };
+
+          const manifestPaths = manifest.files.map((entry) => {
+            assert.deepEqual(Object.keys(entry).sort(), ["bytes", "path", "sha256"]);
+            validateRelativePath(entry.path);
+            assert.notEqual(entry.path, manifestName);
+            assert.notEqual(entry.path, checksumsName);
+            assert.ok(Number.isSafeInteger(entry.bytes) && entry.bytes >= 0);
+            assert.match(entry.sha256, /^[0-9a-f]{64}$/);
+            const absolutePath = path.join(siteRoot, entry.path);
+            assert.equal(lstatSync(absolutePath).isFile(), true);
+            const bytes = readFileSync(absolutePath);
+            assert.equal(bytes.length, entry.bytes);
+            assert.equal(sha256(bytes), entry.sha256);
+            return entry.path;
+          });
+
+          assert.deepEqual(manifestPaths, expectedManifestPaths);
+          assert.equal(new Set(manifestPaths).size, manifestPaths.length);
+          assert.ok(manifestPaths.includes(".nojekyll"));
+          assert.ok(manifestPaths.includes("index.html"));
+
+          const expectedSitePaths = [...manifestPaths, manifestName, checksumsName].sort();
+          assert.deepEqual(walk(siteRoot), expectedSitePaths);
+
+          const checksumLines = readFileSync(path.join(siteRoot, checksumsName), "utf8")
+            .split("\n")
+            .filter(Boolean);
+          const checksumEntries = checksumLines.map((line) => {
+            const match = /^([0-9a-f]{64})  (.+)$/.exec(line);
+            assert.ok(match, `Invalid SHA256SUMS record: ${line}`);
+            validateRelativePath(match[2]);
+            assert.notEqual(match[2], checksumsName);
+            return { sha256: match[1], path: match[2] };
+          });
+          const checksumPaths = checksumEntries.map((entry) => entry.path);
+          assert.deepEqual(checksumPaths, [...manifestPaths, manifestName].sort());
+          assert.equal(new Set(checksumPaths).size, checksumPaths.length);
+          for (const entry of checksumEntries) {
+            assert.equal(sha256(readFileSync(path.join(siteRoot, entry.path))), entry.sha256);
+          }
+
+          appendFileSync(process.env.GITHUB_OUTPUT, `source_sha=${manifest.sourceCommit}\n`);
+          appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            `Validated allowlisted bundle from source \`${manifest.sourceCommit}\`.\n`
+          );
+          NODE
+          (cd site && sha256sum --strict --check SHA256SUMS)
+
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Verify the configured deployment project path
+        shell: bash
+        env:
+          CONFIGURED_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          set -euo pipefail
+          test "${CONFIGURED_BASE_PATH%/}/" = "/query-cartographer-pages/"
+
+      - name: Upload only the audited site directory
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+          include-hidden-files: true
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+
+      - name: Publish the live deployment status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          DEPLOYMENT_SHA: ${{ github.sha }}
+          SOURCE_SHA: ${{ steps.bundle.outputs.source_sha }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          test -n "$SOURCE_SHA"
+          test -n "$PAGE_URL"
+          payload="$(node -e 'process.stdout.write(JSON.stringify({state:"success",context:"github-pages/live",description:`Query Cartographer source ${process.env.SOURCE_SHA}`,target_url:process.env.PAGE_URL}))')"
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$REPOSITORY/statuses/$DEPLOYMENT_SHA" \
+            --data "$payload"
+          printf 'Deployed source `%s` to %s\n' "$SOURCE_SHA" "$PAGE_URL" >> "$GITHUB_STEP_SUMMARY"
