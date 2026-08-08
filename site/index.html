@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark light">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; img-src 'self' data:; media-src 'none'; object-src 'none'; frame-src 'none'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'none'; worker-src 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; img-src 'self' data:; media-src 'none'; object-src 'none'; frame-src 'none'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'none'; worker-src 'none'; require-trusted-types-for 'script'; trusted-types query-cartographer-rendering">
     <title>Query Cartographer</title>
     <link rel="stylesheet" href="./src/styles.css">
   </head>
@@ -164,7 +164,9 @@
                 <h2>Repair Deck</h2>
                 <div class="panel-actions">
                   <output id="flight-caption">No maneuvers</output>
-                  <button id="copy-flight-button" type="button">Copy Draft</button>
+                  <button id="copy-flight-button" type="button">Copy Repair Draft</button>
+                  <button id="copy-formatted-button" type="button">Copy Formatted SQL</button>
+                  <button id="copy-rewrite-button" type="button">Copy Rewrite SQL</button>
                 </div>
               </div>
               <div class="flight-cockpit">
@@ -172,7 +174,17 @@
                   <div id="flight-impact" data-testid="flight-impact" class="flight-impact"></div>
                   <div id="flight-actions" data-testid="flight-actions" class="flight-actions"></div>
                 </div>
-                <pre id="flight-draft" data-testid="flight-draft" class="flight-draft" tabindex="0"></pre>
+                <div class="flight-sql-stack">
+                  <section class="flight-sql-panel" aria-labelledby="repair-draft-title">
+                    <h3 id="repair-draft-title">Repair draft</h3>
+                    <pre id="flight-draft" data-testid="flight-draft" class="flight-draft" tabindex="0"></pre>
+                  </section>
+                  <section class="flight-sql-panel" aria-labelledby="rewrite-title">
+                    <h3 id="rewrite-title">Parameterized rewrite</h3>
+                    <pre id="rewrite-output" tabindex="0"></pre>
+                    <div id="rewrite-notes" class="rewrite-notes" aria-label="Rewrite notes"></div>
+                  </section>
+                </div>
               </div>
             </div>
           </section>
@@ -205,10 +217,6 @@
             <strong id="theater-node-risk">info</strong>
             <div id="lineage-map" data-testid="lineage-map" class="lineage-map"></div>
             <output id="flow-caption">Waiting for SQL</output>
-            <pre id="rewrite-output" tabindex="0"></pre>
-            <div id="rewrite-notes" class="rewrite-notes"></div>
-            <button id="copy-formatted-button" type="button">Copy SQL</button>
-            <button id="copy-rewrite-button" type="button">Copy SQL</button>
           </div>
         </section>
       </main>

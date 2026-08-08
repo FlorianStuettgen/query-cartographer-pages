@@ -1,16 +1,25 @@
+import {
+  escapeCssString,
+  escapeHtml,
+  escapeHtmlAttribute,
+  replaceTrustedMarkup,
+  replaceWithTextState,
+  safeClassToken
+} from "../security/browserBoundary.js";
+
 export function renderTrace(container, analysis) {
   const traceLines = analysis.sourceModel.traceLines;
 
   if (traceLines.length === 0) {
-    container.innerHTML = `<div class="empty-state">No semantic trace available</div>`;
+    replaceWithTextState(container, "No semantic trace available");
     return;
   }
 
-  container.innerHTML = traceLines.map((entry) => `
+  replaceTrustedMarkup(container, traceLines.map((entry) => `
     <button
-      class="trace-row risk-${escapeAttr(entry.severity)}"
+      class="trace-row risk-${safeClassToken(entry.severity)}"
       type="button"
-      data-registry-id="${escapeAttr(entry.id)}"
+      data-registry-id="${escapeHtmlAttribute(entry.id)}"
       data-line-start="${entry.lineStart ?? ""}"
       data-line-end="${entry.lineEnd ?? ""}">
       <span class="trace-kind">${escapeHtml(entry.kind)}</span>
@@ -20,7 +29,7 @@ export function renderTrace(container, analysis) {
       </span>
       <span class="trace-line">${entry.lineStart ? `L${entry.lineStart}` : "derived"}</span>
     </button>
-  `).join("");
+  `).join(""));
 }
 
 export function activateRegistryTarget(root, targetId, sourceModel) {
@@ -65,28 +74,10 @@ export function selectRawSqlLines(textarea, sourceModel, targetId) {
 
 export function pulseSignal(root, targetIds) {
   for (const targetId of targetIds) {
-    root.querySelectorAll(`[data-registry-id="${cssEscape(targetId)}"]`).forEach((node) => {
+    root.querySelectorAll(`[data-registry-id="${escapeCssString(targetId)}"]`).forEach((node) => {
       node.classList.remove("is-pulsing");
       void node.offsetWidth;
       node.classList.add("is-pulsing");
     });
   }
-}
-
-function cssEscape(value) {
-  if (globalThis.CSS?.escape) return CSS.escape(value);
-  return String(value).replace(/["\\]/g, "\\$&");
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function escapeAttr(value) {
-  return String(value).replace(/[^a-z0-9_-]/gi, "");
 }

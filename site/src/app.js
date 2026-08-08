@@ -3,6 +3,15 @@ import { buildLargeDemoSql, LARGE_DEMO_SCHEMA } from "./sql/demoModel.js";
 import { formatRows } from "./sql/flow.js";
 import { resolveRegistryId } from "./sql/identity.js";
 import { renderLineageMap } from "./ui/diagram.js";
+import {
+  escapeCssString,
+  escapeHtml,
+  escapeHtmlAttribute,
+  replaceTrustedMarkup,
+  replaceWithTextState,
+  safeClassToken,
+  visibleText
+} from "./security/browserBoundary.js";
 import { createTheater } from "./ui/theater.js";
 import { activateRegistryTarget, pulseSignal, renderTrace, selectRawSqlLines } from "./ui/trace.js";
 import {
@@ -428,7 +437,7 @@ function analyze({ revealEvidence = false } = {}) {
   highlightLensTarget(selectedTargetId);
   bindFlowSignals(currentAnalysis);
   updateCaptions(currentAnalysis);
-  elements.status.textContent = `${currentAnalysis.briefing.disposition.label}: ${currentAnalysis.briefing.headline}`;
+  elements.status.textContent = visibleText(`${currentAnalysis.briefing.disposition.label}: ${currentAnalysis.briefing.headline}`);
   updateAtlasFilterButtons();
   updateAtlasLayerButtons();
   if (revealEvidence) renderAtlasEvidencePopover(currentAnalysis, selectedTargetId, { open: true });
@@ -463,19 +472,19 @@ function resetReviewContext() {
 }
 
 function renderSummary(analysis) {
-  elements.summary.innerHTML = buildScorecards(analysis).map((card) => `
+  replaceTrustedMarkup(elements.summary, buildScorecards(analysis).map((card) => `
     <button
-      class="metric risk-${escapeAttr(card.tone)}"
+      class="metric risk-${safeClassToken(card.tone)}"
       type="button"
-      title="${escapeAttr(card.detail)}"
-      ${card.mode ? `data-mode="${escapeAttr(card.mode)}"` : ""}
-      ${card.registryId ? `data-registry-id="${escapeAttr(card.registryId)}"` : ""}
-      ${card.flightId ? `data-flight-id="${escapeAttr(card.flightId)}"` : ""}>
+      title="${escapeHtmlAttribute(card.detail)}"
+      ${card.mode ? `data-mode="${escapeHtmlAttribute(card.mode)}"` : ""}
+      ${card.registryId ? `data-registry-id="${escapeHtmlAttribute(card.registryId)}"` : ""}
+      ${card.flightId ? `data-flight-id="${escapeHtmlAttribute(card.flightId)}"` : ""}>
       <span>${escapeHtml(card.label)}</span>
       <strong>${escapeHtml(card.value)}</strong>
       <small>${escapeHtml(card.detail)}</small>
     </button>
-  `).join("");
+  `).join(""));
 }
 
 function buildScorecards(analysis) {
@@ -492,7 +501,7 @@ function buildScorecards(analysis) {
 
 function renderFocusStrip(analysis) {
   if (!analysis) return;
-  elements.perspectiveSwitch.innerHTML = Object.entries(perspectiveConfig).map(([perspective, config]) => `
+  replaceTrustedMarkup(elements.perspectiveSwitch, Object.entries(perspectiveConfig).map(([perspective, config]) => `
     <button
       type="button"
       role="tab"
@@ -500,7 +509,7 @@ function renderFocusStrip(analysis) {
       aria-selected="${perspective === selectedPerspective}">
       ${config.label}
     </button>
-  `).join("");
+  `).join(""));
 }
 
 function renderBriefing(analysis) {
@@ -508,24 +517,24 @@ function renderBriefing(analysis) {
   const config = perspectiveConfig[selectedPerspective] || perspectiveConfig.decision;
   const audience = analysis.profile.audience[config.audienceKey] || analysis.profile.audience.manager;
   const hotspot = briefingHotspotForPerspective(analysis, selectedPerspective);
-  elements.briefing.innerHTML = `
-    <section class="briefing-copy risk-${escapeAttr(audience.tone)}">
+  replaceTrustedMarkup(elements.briefing, `
+    <section class="briefing-copy risk-${safeClassToken(audience.tone)}">
       <span>${config.label} brief</span>
       <strong>${escapeHtml(audience.label)}</strong>
       <p>${escapeHtml(audience.detail)}</p>
     </section>
     ${hotspot ? `
       <button
-        class="briefing-action risk-${escapeAttr(hotspot.tone)}"
+        class="briefing-action risk-${safeClassToken(hotspot.tone)}"
         type="button"
-        ${hotspot.targetId ? `data-registry-id="${escapeAttr(hotspot.targetId)}"` : ""}
-        ${hotspot.flightId ? `data-flight-id="${escapeAttr(hotspot.flightId)}"` : ""}
+        ${hotspot.targetId ? `data-registry-id="${escapeHtmlAttribute(hotspot.targetId)}"` : ""}
+        ${hotspot.flightId ? `data-flight-id="${escapeHtmlAttribute(hotspot.flightId)}"` : ""}
         ${hotspot.kind === "fix" ? `data-mode="fix"` : ""}>
         <span>${escapeHtml(hotspot.prompt)}</span>
         <strong>${escapeHtml(hotspot.label)}</strong>
       </button>
     ` : ""}
-  `;
+  `);
 }
 
 function briefingHotspotForPerspective(analysis, perspective) {
@@ -587,12 +596,12 @@ function setPerspectiveMode(perspective) {
 
 function perspectiveStatus(analysis, perspective) {
   if (perspective === "metrics") {
-    return `Metrics view: ${analysis.profile.metrics.length} signals at ${analysis.profile.grain.label}`;
+    return visibleText(`Metrics view: ${analysis.profile.metrics.length} signals at ${analysis.profile.grain.label}`);
   }
   if (perspective === "debug") {
-    return `Debug view: ${analysis.sourceModel.entries.length} nodes / ${analysis.diagnosis.findings.length} findings / ${analysis.dialect.label}`;
+    return visibleText(`Debug view: ${analysis.sourceModel.entries.length} nodes / ${analysis.diagnosis.findings.length} findings / ${analysis.dialect.label}`);
   }
-  return `Decision view: ${analysis.briefing.headline}`;
+  return visibleText(`Decision view: ${analysis.briefing.headline}`);
 }
 
 function renderAtlasNavigator(analysis) {
@@ -660,13 +669,13 @@ function renderAtlasNavigator(analysis) {
   const routeCount = groups.reduce((total, [, routes]) => total + routes.length, 0);
   const perspectiveLabel = perspectiveConfig[selectedPerspective]?.label || "Decision";
 
-  elements.atlasNavigator.innerHTML = `
+  replaceTrustedMarkup(elements.atlasNavigator, `
     <summary>${perspectiveLabel} routes <span>${routeCount}</span></summary>
     <div class="atlas-route-menu">
       <button class="route-reset" type="button" data-atlas-focus="">Show full query</button>
       ${groups.map(([label, routes]) => renderRouteGroup(label, routes)).join("")}
     </div>
-  `;
+  `);
 }
 
 function renderRouteGroup(label, routes) {
@@ -676,10 +685,10 @@ function renderRouteGroup(label, routes) {
       <h3>${escapeHtml(label)}</h3>
       ${routes.map((route) => `
         <button
-          class="route-chip risk-${escapeAttr(route.tone)}"
+          class="route-chip risk-${safeClassToken(route.tone)}"
           type="button"
-          data-atlas-focus="${escapeHtml(route.focusIds.join(","))}"
-          data-registry-id="${escapeAttr(route.id)}">
+          data-atlas-focus="${escapeHtmlAttribute(route.focusIds.join(","))}"
+          data-registry-id="${escapeHtmlAttribute(route.id)}">
           <strong>${escapeHtml(route.label)}</strong>
           <small>${escapeHtml(route.detail)}</small>
         </button>
@@ -717,24 +726,24 @@ function buildCteStageRoutes(analysis) {
 
 function renderFlow(analysis) {
   if (analysis.flow.steps.length === 0) {
-    elements.flow.innerHTML = `<div class="empty-state">No data motion modeled</div>`;
+    replaceWithTextState(elements.flow, "No data motion modeled");
     return;
   }
 
-  elements.flow.innerHTML = analysis.flow.steps.map((entry, index) => `
-    <button class="flow-step risk-${escapeAttr(entry.risk)}" type="button" data-flow-index="${index}">
+  replaceTrustedMarkup(elements.flow, analysis.flow.steps.map((entry, index) => `
+    <button class="flow-step risk-${safeClassToken(entry.risk)}" type="button" data-flow-index="${index}">
       <span class="step-index">${String(index + 1).padStart(2, "0")} ${escapeHtml(entry.phase)}</span>
       <strong>${escapeHtml(entry.label)}</strong>
       <small>${escapeHtml(formatRows(entry.beforeRows))} -> ${escapeHtml(formatRows(entry.afterRows))}</small>
     </button>
-  `).join("");
+  `).join(""));
 }
 
 function renderFindings(analysis) {
-  elements.findings.innerHTML = analysis.diagnosis.findings.map((entry) => {
+  replaceTrustedMarkup(elements.findings, analysis.diagnosis.findings.map((entry) => {
     const registryId = findRegistryIdForEvidence(analysis, entry.evidence);
     return `
-      <article class="finding risk-${escapeAttr(entry.severity)}" ${registryId ? `data-registry-id="${escapeAttr(registryId)}"` : ""}>
+      <article class="finding risk-${safeClassToken(entry.severity)}" ${registryId ? `data-registry-id="${escapeHtmlAttribute(registryId)}"` : ""}>
         <div class="severity">${escapeHtml(entry.severity)} / ${escapeHtml(entry.category)}</div>
         <h3>${escapeHtml(entry.title)}</h3>
         <p>${escapeHtml(entry.detail)}</p>
@@ -742,7 +751,7 @@ function renderFindings(analysis) {
         ${entry.suggestion ? `<p>${escapeHtml(entry.suggestion)}</p>` : ""}
       </article>
     `;
-  }).join("");
+  }).join(""));
 }
 
 function renderFlight(analysis) {
@@ -750,25 +759,25 @@ function renderFlight(analysis) {
   const actions = plan.actions;
   selectedFlightActionId = actions[0]?.id ?? "";
 
-  elements.flightImpact.innerHTML = `
+  replaceTrustedMarkup(elements.flightImpact, `
     ${renderImpactGauge("Risk", `${plan.impact.beforeRisk}`, `${plan.impact.afterRisk}`, "score")}
     ${renderImpactGauge("Complexity", `${plan.impact.beforeComplexity}`, `${plan.impact.afterComplexity}`, "score")}
     ${renderImpactGauge("Peak Rows", formatRows(plan.impact.beforePeakRows), formatRows(plan.impact.afterPeakRows), "rows")}
     ${renderImpactGauge("Avoided Rows", `${formatRows(plan.impact.rowsAvoided)} modeled`, "", "rows")}
-  `;
+  `);
 
   if (actions.length === 0) {
-    elements.flightActions.innerHTML = `<div class="empty-state">No repair deck available</div>`;
-    elements.flightDraft.textContent = plan.draftSql || analysis.ast.sql || "";
+    replaceWithTextState(elements.flightActions, "No repair deck available");
+    elements.flightDraft.textContent = visibleText(currentFlightDraftSql(analysis));
     return;
   }
 
-  elements.flightActions.innerHTML = actions.map((action, index) => `
+  replaceTrustedMarkup(elements.flightActions, actions.map((action, index) => `
     <button
-      class="flight-card risk-${escapeAttr(action.severity)} ${index === 0 ? "is-active" : ""}"
+      class="flight-card risk-${safeClassToken(action.severity)} ${index === 0 ? "is-active" : ""}"
       type="button"
-      data-flight-id="${escapeAttr(action.id)}"
-      ${action.targetId ? `data-registry-id="${escapeAttr(action.targetId)}"` : ""}>
+      data-flight-id="${escapeHtmlAttribute(action.id)}"
+      ${action.targetId ? `data-registry-id="${escapeHtmlAttribute(action.targetId)}"` : ""}>
       <span class="flight-rank">${String(index + 1).padStart(2, "0")} ${escapeHtml(action.severity)}</span>
       <strong>${escapeHtml(action.title)}</strong>
       <span>${escapeHtml(action.maneuver)}</span>
@@ -777,9 +786,9 @@ function renderFlight(analysis) {
         risk -${escapeHtml(action.riskDelta)} / confidence ${escapeHtml(action.confidence)}
       </small>
     </button>
-  `).join("");
+  `).join(""));
 
-  elements.flightDraft.textContent = plan.draftSql || analysis.ast.sql || "";
+  elements.flightDraft.textContent = visibleText(currentFlightDraftSql(analysis));
 }
 
 function renderImpactGauge(label, before, after, kind) {
@@ -794,7 +803,7 @@ function renderImpactGauge(label, before, after, kind) {
     <article class="flight-gauge">
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(value)}</strong>
-      <i style="--gauge:${percent.toFixed(1)}%" data-kind="${escapeAttr(kind)}"></i>
+      <i style="--gauge:${percent.toFixed(1)}%" data-kind="${safeClassToken(kind)}"></i>
     </article>
   `;
 }
@@ -810,23 +819,23 @@ function selectFlightAction(actionId) {
   });
 
   if (action.targetId) activateSemanticTarget(action.targetId, { preserveMode: true });
-  elements.flightDraft.textContent = action.previewSql || currentAnalysis.flightPlan.draftSql || currentAnalysis.ast.sql || "";
-  elements.status.textContent = `${action.title}: review draft ready`;
+  elements.flightDraft.textContent = visibleText(currentFlightDraftSql(currentAnalysis));
+  elements.status.textContent = visibleText(`${action.title}: review draft ready`);
 }
 
 function renderRewrite(analysis) {
-  elements.rewrite.textContent = analysis.rewrite.sql || "";
-  elements.rewriteNotes.innerHTML = analysis.rewrite.notes.map((entry) => `
+  elements.rewrite.textContent = visibleText(analysis.rewrite.sql || "");
+  replaceTrustedMarkup(elements.rewriteNotes, analysis.rewrite.notes.map((entry) => `
     <article class="note">
       <h3>${escapeHtml(entry.title)}</h3>
       <p>${escapeHtml(entry.detail)}</p>
     </article>
-  `).join("");
+  `).join(""));
 }
 
 function renderQueryLens(analysis) {
   const rows = buildLensRows(analysis);
-  elements.formatted.innerHTML = rows.map(renderLensRow).join("") || renderLensRow({
+  replaceTrustedMarkup(elements.formatted, rows.map(renderLensRow).join("") || renderLensRow({
     lineNumber: 1,
     rawLine: 1,
     text: "",
@@ -835,17 +844,17 @@ function renderQueryLens(analysis) {
     scopeLabel: "SQL",
     severity: "info",
     diagnostic: ""
-  });
-  elements.lensMinimap.innerHTML = rows.map((row) => `
+  }));
+  replaceTrustedMarkup(elements.lensMinimap, rows.map((row) => `
     <button
-      class="lens-mini-line lens-risk-${escapeAttr(row.severity)}"
+      class="lens-mini-line lens-risk-${safeClassToken(row.severity)}"
       type="button"
-      title="${escapeAttr(row.diagnostic || `${row.scopeLabel} line ${row.lineNumber}`)}"
+      title="${escapeHtmlAttribute(row.diagnostic || `${row.scopeLabel} line ${row.lineNumber}`)}"
       data-lens-line="${row.lineNumber}"
       data-raw-line="${row.rawLine || row.lineNumber}"
-      ${row.targetId ? `data-registry-id="${escapeAttr(row.targetId)}"` : ""}>
+      ${row.targetId ? `data-registry-id="${escapeHtmlAttribute(row.targetId)}"` : ""}>
     </button>
-  `).join("");
+  `).join(""));
   renderLensOverview(analysis, rows);
   elements.lensCaption.textContent = `${rows.length} lines`;
 }
@@ -863,11 +872,11 @@ function renderLensRow(row) {
   ].filter(Boolean).join(" / ");
 
   return [
-    `<span class="lens-line lens-risk-${escapeAttr(row.severity)}"`,
+    `<span class="lens-line lens-risk-${safeClassToken(row.severity)}"`,
     ` data-lens-line="${row.lineNumber}"`,
     ` data-raw-line="${row.rawLine || row.lineNumber}"`,
-    row.targetId ? ` data-registry-id="${escapeAttr(row.targetId)}"` : "",
-    ` title="${escapeAttr(title)}">`,
+    row.targetId ? ` data-registry-id="${escapeHtmlAttribute(row.targetId)}"` : "",
+    ` title="${escapeHtmlAttribute(title)}">`,
     `<span class="lens-rail"><span class="lens-no">${String(row.lineNumber).padStart(4, " ")}</span><span class="lens-marker" aria-hidden="true"></span></span>`,
     `<span class="lens-scope">${escapeHtml(row.scope)}</span>`,
     `<code>${highlightSqlLine(row.text || " ")}</code>`,
@@ -881,16 +890,16 @@ function renderLensOverview(analysis, rows) {
   const linkedRows = rows.filter((row) => row.targetId).length;
   const recovery = lensText(analysis) === analysis.ast.sql;
 
-  elements.lensOverview.innerHTML = `
+  replaceTrustedMarkup(elements.lensOverview, `
     <div class="lens-statusline">
-      <span class="lens-state lens-risk-${escapeAttr(analysis.profile.posture.tone)}">${escapeHtml(analysis.profile.posture.label)}</span>
+      <span class="lens-state lens-risk-${safeClassToken(analysis.profile.posture.tone)}">${escapeHtml(analysis.profile.posture.label)}</span>
       <span>${highRows} blocking</span>
       <span>${Math.max(0, riskRows - highRows)} watch</span>
       <span>${linkedRows} linked</span>
       <span>${escapeHtml(analysis.dialect.label)}</span>
       <span>${recovery ? "Syntax recovery" : "Formatted model"}</span>
     </div>
-  `;
+  `);
 }
 
 function buildLensRows(analysis) {
@@ -1066,7 +1075,7 @@ function renderTheater(analysis) {
     focusIds,
     selectedId: selectedTargetId,
     perspective: selectedPerspective,
-    showSelectionLabel: false,
+    showSelectionLabel: true,
     onSelectionAnchor: handleAtlasSelectionAnchor
   });
   if (!selectedTargetId) selectedTargetId = currentAnalysis?.sourceModel?.resultId || "";
@@ -1151,7 +1160,7 @@ function setAtlasLayer(layer) {
   updateAtlasLayerButtons();
   if (currentAnalysis) {
     renderTheater(currentAnalysis);
-    elements.status.textContent = `${capitalize(atlasLayer)} layer: ${currentAnalysis.briefing.headline}`;
+    elements.status.textContent = visibleText(`${capitalize(atlasLayer)} layer: ${currentAnalysis.briefing.headline}`);
   }
 }
 
@@ -1202,43 +1211,6 @@ function setInspectorCollapsed(collapsed) {
   window.setTimeout(() => theater?.resize(), 0);
 }
 
-function bindFloatingCard(card) {
-  if (!card) return;
-  let drag = null;
-
-  card.addEventListener("pointerdown", (event) => {
-    if (event.target.closest("button, a, input, textarea, select")) return;
-    card.setPointerCapture(event.pointerId);
-    drag = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      baseX: Number(card.dataset.floatX || 0),
-      baseY: Number(card.dataset.floatY || 0)
-    };
-    card.classList.add("is-moving");
-  });
-
-  card.addEventListener("pointermove", (event) => {
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const x = drag.baseX + event.clientX - drag.startX;
-    const y = drag.baseY + event.clientY - drag.startY;
-    card.dataset.floatX = String(x);
-    card.dataset.floatY = String(y);
-    card.style.transform = `translate(${x}px, ${y}px)`;
-  });
-
-  const stopDrag = (event) => {
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    card.releasePointerCapture(event.pointerId);
-    drag = null;
-    card.classList.remove("is-moving");
-  };
-
-  card.addEventListener("pointerup", stopDrag);
-  card.addEventListener("pointercancel", stopDrag);
-}
-
 function bindFlowSignals(analysis) {
   const steps = [...elements.flow.querySelectorAll(".flow-step")];
   steps.forEach((node, index) => {
@@ -1269,8 +1241,8 @@ function renderAtlasEvidencePopover(analysis, targetId, options = {}) {
   const lineLabel = entry.lineStart ? `Raw line ${entry.lineStart}` : "Derived query node";
 
   elements.atlasEvidence.dataset.perspective = selectedPerspective;
-  elements.atlasEvidence.innerHTML = `
-    <header class="atlas-evidence-head risk-${escapeAttr(tone)}">
+  replaceTrustedMarkup(elements.atlasEvidence, `
+    <header class="atlas-evidence-head risk-${safeClassToken(tone)}">
       <div>
         <span>${config.label} evidence</span>
         <strong>${escapeHtml(entry.label || "Query result")}</strong>
@@ -1285,7 +1257,7 @@ function renderAtlasEvidencePopover(analysis, targetId, options = {}) {
       <button type="button" data-mode="inspect">Full evidence</button>
       ${action ? `<button type="button" class="primary" data-mode="fix">Repair plan</button>` : ""}
     </footer>
-  `;
+  `);
   atlasEvidenceOpen = options.open !== false;
   elements.atlasEvidence.hidden = !atlasEvidenceOpen;
   if (atlasEvidenceOpen) window.requestAnimationFrame(positionAtlasEvidencePopover);
@@ -1450,7 +1422,7 @@ function activateSemanticTarget(targetId, options = {}) {
   highlightLensTarget(canonicalTargetId);
   const active = currentAnalysis.sourceModel.registry.get(canonicalTargetId);
   if (active) {
-    elements.status.textContent = `${active.label}: ${active.lineStart ? `raw line ${active.lineStart}` : "derived node"} (${related.length} linked)`;
+    elements.status.textContent = visibleText(`${active.label}: ${active.lineStart ? `raw line ${active.lineStart}` : "derived node"} (${related.length} linked)`);
   }
   if (!options.preserveMode && document.querySelector("#view-atlas")?.hidden) activateTab("inspect");
 }
@@ -1478,13 +1450,16 @@ function renderInspectBoard(analysis, targetId, options = {}) {
   const relatedSources = sourcesForSelection(analysis, entry, relatedMetrics).slice(0, 6);
   const predecessorLabels = labelTargets(analysis, entry?.predecessors ?? []);
   const descendantLabels = labelTargets(analysis, entry?.descendants ?? []);
+  const inspectorToggleLabel = elements.inspect.classList.contains("is-minimized")
+    ? "Expand inspector"
+    : "Collapse inspector";
 
-  elements.inspect.innerHTML = `
+  replaceTrustedMarkup(elements.inspect, `
     <div class="card-minibar">
       <span>Inspect</span>
-      <button type="button" data-minimize-card aria-label="Collapse inspector">&#8250;</button>
+      <button type="button" data-minimize-card aria-label="${escapeHtmlAttribute(inspectorToggleLabel)}">&#8250;</button>
     </div>
-    <section class="inspect-head risk-${escapeAttr(entry?.severity || finding?.severity || "info")}">
+    <section class="inspect-head risk-${safeClassToken(entry?.severity || finding?.severity || "info")}">
       <span>${escapeHtml(entry?.kind || "result")}</span>
       <h3>${escapeHtml(entry?.label || "Result")}</h3>
       <p>${escapeHtml(entry?.lineStart ? `Raw line ${entry.lineStart}` : "Derived from the query model")}</p>
@@ -1540,13 +1515,13 @@ function renderInspectBoard(analysis, targetId, options = {}) {
       </summary>
       ${analysis.profile.questions.slice(0, 3).map((question) => `<p>${escapeHtml(question)}</p>`).join("")}
     </details>
-  `;
+  `);
 }
 
 function renderSourceChip(source) {
   const name = source.alias ? `${source.name} as ${source.alias}` : source.name;
   return `
-    <button class="source-chip risk-${escapeAttr(source.tone)}" type="button" data-registry-id="${escapeAttr(source.id)}">
+    <button class="source-chip risk-${safeClassToken(source.tone)}" type="button" data-registry-id="${escapeHtmlAttribute(source.id)}">
       <span>${escapeHtml(source.role)}</span>
       <strong>${escapeHtml(name)}</strong>
       <small>${escapeHtml(formatRows(source.rows))} rows / ${escapeHtml(source.schemaStatus)} / ${escapeHtml(source.detail)}</small>
@@ -1559,7 +1534,7 @@ function renderMetricLineageCard(metric) {
     ? metric.sources.map((source) => `${source.table}.${source.column}`).join(" + ")
     : "source columns not statically resolved";
   return `
-    <button class="metric-lineage-card risk-${escapeAttr(metric.tone)}" type="button" data-registry-id="${escapeAttr(metric.id)}">
+    <button class="metric-lineage-card risk-${safeClassToken(metric.tone)}" type="button" data-registry-id="${escapeHtmlAttribute(metric.id)}">
       <span>${escapeHtml(metric.type)}</span>
       <strong>${escapeHtml(metric.label)}</strong>
       <small>${escapeHtml(metric.businessMeaning)}</small>
@@ -1598,7 +1573,7 @@ function labelTargets(analysis, targetIds) {
 
 function updateTheaterRail(targetId) {
   const entry = currentAnalysis?.sourceModel.registry.get(targetId);
-  elements.theaterNodeLabel.textContent = entry?.label || "Result";
+  elements.theaterNodeLabel.textContent = visibleText(entry?.label || "Result");
   elements.theaterNodeLine.textContent = entry?.lineStart ? `L${entry.lineStart}` : "derived";
   elements.theaterNodeRisk.textContent = entry?.severity || "info";
 }
@@ -1615,11 +1590,11 @@ function highlightLensTarget(targetId) {
 
   let first = null;
   if (targetId) {
-    elements.formatted.querySelectorAll(`[data-registry-id="${escapeAttr(targetId)}"]`).forEach((node) => {
+    elements.formatted.querySelectorAll(`[data-registry-id="${escapeCssString(targetId)}"]`).forEach((node) => {
       node.classList.add("is-active");
       if (!first) first = node;
     });
-    elements.lensMinimap.querySelectorAll(`[data-registry-id="${escapeAttr(targetId)}"]`).forEach((node) => {
+    elements.lensMinimap.querySelectorAll(`[data-registry-id="${escapeCssString(targetId)}"]`).forEach((node) => {
       node.classList.add("is-active");
     });
   }
@@ -1771,11 +1746,7 @@ function setEditorWidth(value, workspaceWidth) {
   const width = Math.round(Math.max(min, Math.min(max, value)));
   elements.workspace.style.setProperty("--editor-width", `${width}px`);
   elements.workspaceResizer.setAttribute("aria-valuenow", String(width));
-  try {
-    localStorage.setItem(LAYOUT_KEY, String(width));
-  } catch {
-    // Local persistence is optional.
-  }
+  writeLocalStorage(LAYOUT_KEY, String(width));
 }
 
 function applySavedLayout() {
@@ -1824,7 +1795,7 @@ function reportBrowserExportError(error) {
       : error?.dispatchState === BROWSER_DOWNLOAD_STATES.notStarted
         ? `Export failed before download started: ${message}`
         : `Export failed: ${message}`;
-  elements.status.textContent = status;
+  elements.status.textContent = visibleText(status);
   window.__qcErrors.push(status);
 }
 
@@ -1841,9 +1812,15 @@ async function copyFormattedSql() {
 }
 
 async function copyFlightDraft() {
-  const sql = elements.flightDraft.textContent || currentAnalysis?.flightPlan.draftSql || "";
+  const sql = currentFlightDraftSql(currentAnalysis);
   const copied = await copyText(sql);
   elements.status.textContent = copied ? "Repair draft copied" : "Clipboard unavailable";
+}
+
+function currentFlightDraftSql(analysis) {
+  if (!analysis) return "";
+  const selectedAction = analysis.flightPlan.actions.find(({ id }) => id === selectedFlightActionId);
+  return selectedAction?.previewSql || analysis.flightPlan.draftSql || analysis.ast.sql || "";
 }
 
 async function copyText(text) {
@@ -1858,7 +1835,6 @@ async function copyText(text) {
 function toggleTheme() {
   const next = document.body.classList.contains("theme-light") ? "dark" : "light";
   applyTheme(next);
-  localStorage.setItem(THEME_KEY, next);
 }
 
 function applyTheme(theme) {
@@ -1866,7 +1842,7 @@ function applyTheme(theme) {
   document.body.classList.toggle("theme-light", light);
   elements.theme.textContent = light ? "Use dark theme" : "Use light theme";
   elements.theme.setAttribute("aria-pressed", String(light));
-  localStorage.setItem(THEME_KEY, light ? "light" : "dark");
+  writeLocalStorage(THEME_KEY, light ? "light" : "dark");
   window.setTimeout(() => theater?.resize(), 0);
 }
 
@@ -1887,18 +1863,28 @@ function readSavedState() {
 }
 
 function saveState(sql, schema) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ sql, schema }));
+  if (!sql && !schema) {
+    removeLocalStorage(STORAGE_KEY);
+    return;
+  }
+  writeLocalStorage(STORAGE_KEY, JSON.stringify({ sql, schema }));
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+function writeLocalStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    // Local persistence is an optional convenience; analysis must remain live.
+    return false;
+  }
 }
 
-function escapeAttr(value) {
-  return String(value).replace(/[^a-z0-9_-]/gi, "");
+function removeLocalStorage(key) {
+  try {
+    localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
 }

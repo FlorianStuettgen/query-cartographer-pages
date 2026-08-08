@@ -1,3 +1,11 @@
+import {
+  escapeHtml,
+  escapeHtmlAttribute,
+  replaceTrustedMarkup,
+  replaceWithTextState,
+  safeClassToken
+} from "../security/browserBoundary.js";
+
 const ENTRY_ORDER = ["cte", "source", "source-asset", "join", "where", "group", "having", "order", "limit", "projection", "result"];
 
 const X_BY_KIND = {
@@ -18,16 +26,16 @@ export function renderLineageMap(container, analysis) {
   const { ast, sourceModel } = analysis;
 
   if (!ast.sql?.trim()) {
-    container.innerHTML = `<div class="empty-state">No query analyzed</div>`;
+    replaceWithTextState(container, "No query analyzed");
     return;
   }
 
   if (ast.unsupported) {
-    container.innerHTML = `<div class="empty-state">Read-only map unavailable for ${escapeHtml(ast.statementType.toUpperCase())}</div>`;
+    replaceWithTextState(container, `Read-only map unavailable for ${ast.statementType.toUpperCase()}`);
     return;
   }
 
-  container.innerHTML = buildMap(sourceModel);
+  replaceTrustedMarkup(container, buildMap(sourceModel));
 }
 
 function buildMap(sourceModel) {
@@ -150,7 +158,7 @@ function edge(from, to, label, risk) {
 
 function renderNode(entry) {
   return `
-    <g class="node node-${escapeAttr(entry.type)} ${entry.risk ? "node-risk" : ""}" data-registry-id="${escapeAttr(entry.id)}" transform="translate(${entry.x} ${entry.y})">
+    <g class="node node-${safeClassToken(entry.type)} ${entry.risk ? "node-risk" : ""}" data-registry-id="${escapeHtmlAttribute(entry.id)}" transform="translate(${entry.x} ${entry.y})">
       <rect class="node-rect" width="${entry.width}" height="${entry.height}" rx="8"></rect>
       <text class="node-label" x="14" y="24">${escapeHtml(summarize(entry.label, 22))}</text>
       <text class="node-detail" x="14" y="43">${escapeHtml(summarize(entry.detail, 28))}</text>
@@ -174,7 +182,7 @@ function renderEdge(entry, nodeById) {
   const labelY = (y1 + y2) / 2 - 8;
 
   return `
-    <path class="edge ${entry.risk ? "edge-risk" : ""}" data-registry-from="${escapeAttr(entry.from)}" data-registry-to="${escapeAttr(entry.to)}" d="${path}" marker-end="url(#${entry.risk ? "arrow-risk" : "arrow"})"></path>
+    <path class="edge ${entry.risk ? "edge-risk" : ""}" data-registry-from="${escapeHtmlAttribute(entry.from)}" data-registry-to="${escapeHtmlAttribute(entry.to)}" d="${path}" marker-end="url(#${entry.risk ? "arrow-risk" : "arrow"})"></path>
     ${entry.label ? `<text class="edge-label" x="${labelX}" y="${labelY}">${escapeHtml(summarize(entry.label, 30))}</text>` : ""}
   `;
 }
@@ -182,17 +190,4 @@ function renderEdge(entry, nodeById) {
 function summarize(value, max = 42) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text.length > max ? `${text.slice(0, max - 1)}...` : text;
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function escapeAttr(value) {
-  return String(value).replace(/[^a-z0-9_-]/gi, "");
 }

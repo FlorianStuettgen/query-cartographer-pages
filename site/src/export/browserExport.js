@@ -5,6 +5,7 @@ import {
   serializeCanonicalJsonExport
 } from "./exportContract.js";
 import { serializeDeterministicMarkdownExport } from "./markdownContract.js";
+import { assertSafeDownloadFilename } from "../security/browserBoundary.js";
 
 export const BROWSER_EXPORT_FORMATS = Object.freeze({
   json: "json",
@@ -141,6 +142,17 @@ export function downloadBrowserExport(artifact, {
   } catch (error) {
     throw lifecycleError("create-object-url", dispatchState, error);
   }
+  try {
+    assertSafeObjectUrl(url);
+  } catch (error) {
+    const cleanupErrors = [];
+    try {
+      revokeObjectURL(url);
+    } catch (revokeError) {
+      cleanupErrors.push({ phase: "revoke", error: revokeError });
+    }
+    throw lifecycleError("create-object-url", dispatchState, error, cleanupErrors);
+  }
 
   let link = null;
   let operationPhase = "create-element";
@@ -233,11 +245,17 @@ function assertSupportedFormat(format) {
 function assertArtifact(artifact) {
   if (!artifact || typeof artifact !== "object") throw new TypeError("Export artifact must be an object");
   assertSupportedFormat(artifact.format);
-  if (typeof artifact.filename !== "string" || !artifact.filename) throw new TypeError("Export filename is required");
+  assertSafeDownloadFilename(artifact.filename, BROWSER_EXPORT_EXTENSIONS[artifact.format]);
   if (artifact.mimeType !== BROWSER_EXPORT_MIME_TYPES[artifact.format]) {
     throw new TypeError("Export MIME type does not match its format");
   }
   if (typeof artifact.content !== "string") throw new TypeError("Export content must be text");
+}
+
+function assertSafeObjectUrl(url) {
+  if (typeof url !== "string" || !url.startsWith("blob:")) {
+    throw new TypeError("Browser export object URL must use the blob protocol");
+  }
 }
 
 function assertFunction(value, name) {

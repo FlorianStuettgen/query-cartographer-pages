@@ -490,6 +490,7 @@ pre {
   background: #050909;
   color: #f4fbf8;
   line-height: 1.5;
+  unicode-bidi: plaintext;
 }
 
 .query-lens::-webkit-scrollbar {
@@ -1440,6 +1441,46 @@ pre {
   white-space: pre;
 }
 
+.flight-sql-stack {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: repeat(2, minmax(210px, 1fr));
+  overflow: auto;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.flight-sql-panel {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.flight-sql-panel > h3 {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.flight-sql-panel > pre {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  white-space: pre;
+}
+
+.flight-sql-panel .rewrite-notes {
+  max-height: 128px;
+  border-top: 1px solid var(--line);
+}
+
 .inspect-workbench {
   display: grid;
   grid-template-columns: minmax(320px, 0.92fr) minmax(320px, 1.08fr);
@@ -2044,6 +2085,7 @@ body {
   white-space: pre;
   overflow: auto;
   tab-size: 2;
+  unicode-bidi: plaintext;
 }
 
 .lens-panel {

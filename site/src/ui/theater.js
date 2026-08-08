@@ -1,3 +1,5 @@
+import { visibleText } from "../security/browserBoundary.js";
+
 const KIND_LAYER = {
   cte: 0,
   source: 0,
@@ -525,7 +527,7 @@ function drawLayerReadout(ctx, layer, analysis, width, view, perspective) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "rgba(238, 246, 243, 0.62)";
-  ctx.fillText(`${readout} / ${Math.round(view.scale * 100)}%`, width / 2, 24);
+  ctx.fillText(visibleText(`${readout} / ${Math.round(view.scale * 100)}%`), width / 2, 24);
   ctx.restore();
 }
 
@@ -626,7 +628,7 @@ function nodeVisible(node, filters) {
 
 function drawSelectionLabel(ctx, node, width, height) {
   if (!node) return;
-  const label = `${node.kind.toUpperCase()} / ${node.label}`;
+  const label = visibleText(`${node.kind.toUpperCase()} / ${node.label}`);
   const detail = node.lineStart ? `raw line ${node.lineStart}` : "derived node";
   ctx.save();
   ctx.font = "700 12px Inter, system-ui, sans-serif";
@@ -699,7 +701,7 @@ function maxRisk(a, b) {
 }
 
 function truncate(text, max) {
-  const value = String(text || "");
+  const value = visibleText(text || "");
   return value.length > max ? `${value.slice(0, max - 1)}...` : value;
 }
 
