@@ -115,6 +115,7 @@ jobs:
             "src/export/canonicalJson.js",
             "src/export/exportContract.js",
             "src/export/markdownContract.js",
+            "src/security/browserBoundary.js",
             "src/sql/analyzer.js",
             "src/sql/briefing.js",
             "src/sql/demoModel.js",
