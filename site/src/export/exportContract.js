@@ -2,6 +2,7 @@ import { canonicalizeJsonValue, serializeCanonicalJson } from "./canonicalJson.j
 import {
   IDENTITY_NAMESPACE,
   IDENTITY_SCHEMA_VERSION,
+  CANONICAL_SOURCE_MODEL_ID_PATTERN,
   canonicalClauseText,
   stableDigest
 } from "../sql/identity.js";
@@ -15,7 +16,7 @@ const ANALYSIS_ID_PREFIX = "q02b2a-v1-analysis-";
 const HEX_64 = /^[0-9a-f]{16}$/;
 const INPUT_ID = /^q02b2a-v1-input-[0-9a-f]{16}$/;
 const ANALYSIS_ID = /^q02b2a-v1-analysis-[0-9a-f]{16}$/;
-const SOURCE_ID = /^q02a-v1-source-model-[0-9a-f]{16}(?:-r(?:0[2-9]|[1-9][0-9]+))?$/;
+const SOURCE_ID = CANONICAL_SOURCE_MODEL_ID_PATTERN;
 const FINDING_ID = /^q02a-v1-finding-[0-9a-f]{16}(?:-r(?:0[2-9]|[1-9][0-9]+))?$/;
 const METRIC_ID = /^q02a-v1-metric-[0-9a-f]{16}(?:-r(?:0[2-9]|[1-9][0-9]+))?$/;
 const ACTION_ID = /^q02a-v1-flight-action-[0-9a-f]{16}(?:-r(?:0[2-9]|[1-9][0-9]+))?$/;

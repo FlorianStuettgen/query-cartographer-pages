@@ -43,6 +43,13 @@ export function createTheater(stage, analysis, onActivate, options = {}) {
   const showSelectionLabel = options.showSelectionLabel !== false;
   const requestedSelection = options.selectedId;
   const onSelectionAnchor = typeof options.onSelectionAnchor === "function" ? options.onSelectionAnchor : null;
+  const motionPreference = typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-reduced-motion: reduce)")
+    : {
+        matches: false,
+        addEventListener() {},
+        removeEventListener() {}
+      };
   const nodes = layoutNodes(analysis.sourceModel.entries);
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const edges = buildEdges(nodes, nodeById);
@@ -59,6 +66,7 @@ export function createTheater(stage, analysis, onActivate, options = {}) {
   let drag = null;
   let suppressClick = false;
   let lastAnchorKey = "";
+  let reducedMotion = motionPreference.matches;
 
   const resize = () => {
     const canvasRect = canvas.getBoundingClientRect();
@@ -145,9 +153,32 @@ export function createTheater(stage, analysis, onActivate, options = {}) {
   };
 
   const tick = () => {
+    animationId = 0;
+    if (reducedMotion) {
+      frame = 0;
+      draw();
+      return;
+    }
     frame += 1;
     draw();
     animationId = window.requestAnimationFrame(tick);
+  };
+
+  const startAnimation = () => {
+    if (reducedMotion || animationId) return;
+    animationId = window.requestAnimationFrame(tick);
+  };
+
+  const handleMotionPreference = (event) => {
+    reducedMotion = event.matches;
+    if (reducedMotion) {
+      if (animationId) window.cancelAnimationFrame(animationId);
+      animationId = 0;
+      frame = 0;
+      draw();
+      return;
+    }
+    startAnimation();
   };
 
   const draw = () => {
@@ -184,8 +215,9 @@ export function createTheater(stage, analysis, onActivate, options = {}) {
   canvas.addEventListener("pointercancel", handlePointerUp);
   canvas.addEventListener("wheel", handleWheel, { passive: false });
   window.addEventListener("resize", resize);
+  motionPreference.addEventListener("change", handleMotionPreference);
   resize();
-  tick();
+  startAnimation();
 
   return {
     select(id) {
@@ -201,6 +233,7 @@ export function createTheater(stage, analysis, onActivate, options = {}) {
     destroy() {
       window.cancelAnimationFrame(animationId);
       window.removeEventListener("resize", resize);
+      motionPreference.removeEventListener("change", handleMotionPreference);
       canvas.removeEventListener("click", handleClick);
       canvas.removeEventListener("pointerdown", handlePointerDown);
       canvas.removeEventListener("pointermove", handlePointerMove);
@@ -209,6 +242,9 @@ export function createTheater(stage, analysis, onActivate, options = {}) {
       canvas.removeEventListener("wheel", handleWheel);
     },
     resize,
+    visibleNodeIds() {
+      return focusedNodes(visibleNodes(nodes, filters), focusIds).map(({ id }) => id);
+    },
     stats() {
       return {
         nodes: nodes.length,

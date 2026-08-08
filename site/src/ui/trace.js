@@ -22,7 +22,7 @@ export function renderTrace(container, analysis) {
       data-registry-id="${escapeHtmlAttribute(entry.id)}"
       data-line-start="${entry.lineStart ?? ""}"
       data-line-end="${entry.lineEnd ?? ""}">
-      <span class="trace-kind">${escapeHtml(entry.kind)}</span>
+      <span class="trace-kind">${escapeHtml(`${entry.kind} / ${entry.severity} risk`)}</span>
       <span class="trace-main">
         <strong>${escapeHtml(entry.label)}</strong>
         <code>${escapeHtml(entry.text)}</code>
@@ -46,6 +46,15 @@ export function activateRegistryTarget(root, targetId, sourceModel) {
     const id = node.dataset.registryId;
     node.classList.toggle("is-active", id === targetId);
     node.classList.toggle("is-related", relatedIds.has(id) && id !== targetId);
+    if (node.matches(".finding")) {
+      if (id === targetId) node.setAttribute("aria-current", "true");
+      else node.removeAttribute("aria-current");
+    } else if (node.matches("button:not(.atlas-open-evidence):not(.atlas-open-sql)")) {
+      if (id === targetId) node.setAttribute("aria-current", "true");
+      else node.removeAttribute("aria-current");
+    } else if (node.matches("[role='option'], .atlas-open-evidence, .atlas-open-sql")) {
+      node.removeAttribute("aria-current");
+    }
   });
 
   root.querySelectorAll("[data-registry-from][data-registry-to]").forEach((node) => {
@@ -57,15 +66,20 @@ export function activateRegistryTarget(root, targetId, sourceModel) {
   return [...relatedIds];
 }
 
-export function selectRawSqlLines(textarea, sourceModel, targetId) {
+export function selectRawSqlLines(textarea, sourceModel, targetId, options = {}) {
   const entry = sourceModel.registry.get(targetId);
-  if (!entry?.lineStart) return;
+  if (!entry) return;
+  if (!entry.lineStart) {
+    const collapsedCaret = textarea.selectionEnd ?? textarea.selectionStart ?? 0;
+    textarea.setSelectionRange(collapsedCaret, collapsedCaret);
+    return;
+  }
 
   const startLine = sourceModel.rawLines[entry.lineStart - 1];
   const endLine = sourceModel.rawLines[(entry.lineEnd || entry.lineStart) - 1] ?? startLine;
   if (!startLine || !endLine) return;
 
-  textarea.focus();
+  if (options.focus === true) textarea.focus();
   textarea.setSelectionRange(startLine.start, endLine.end);
 
   const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 20;

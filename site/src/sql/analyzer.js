@@ -3,7 +3,7 @@ import { detectDialect } from "./dialects.js";
 import { buildBriefing } from "./briefing.js";
 import { buildFlightPlan } from "./flightPlan.js";
 import { buildFlow } from "./flow.js";
-import { formatSql } from "./formatter.js";
+import { formatSqlWithLineMap } from "./formatter.js";
 import { parseSql } from "./parser.js";
 import { buildMarkdownReport, buildRewrite } from "./rewrites.js";
 import { parseSchemaNotes } from "./schema.js";
@@ -20,7 +20,7 @@ export function analyzeQuery(sql, schemaText = "") {
   const diagnosis = diagnose(ast, schema, dialect);
   const flow = buildFlow(ast, schema, diagnosis);
   const rewrite = buildRewrite(ast, diagnosis, flow);
-  const formattedSql = formatSql(sql);
+  const { formattedSql, lineMap: formattedLineMap } = formatSqlWithLineMap(sql);
   const sourceModel = buildSourceModel(sql, ast, diagnosis, flow);
   const flightPlan = buildFlightPlan(ast, diagnosis, flow, sourceModel);
   const briefing = buildBriefing({ ast, schema, dialect, diagnosis, flow, flightPlan });
@@ -39,6 +39,7 @@ export function analyzeQuery(sql, schemaText = "") {
     flightPlan,
     report,
     formattedSql,
+    formattedLineMap,
     sourceModel,
     metrics: buildMetrics(ast, schema, diagnosis, flow),
     identity: {

@@ -15,7 +15,7 @@
           <span class="brand-mark" aria-hidden="true">QC</span>
           <div>
             <h1>Query Cartographer</h1>
-            <p id="analysis-status">Local SQL cockpit ready</p>
+            <p id="analysis-status" role="status" aria-live="polite" aria-atomic="true">Local SQL cockpit ready</p>
           </div>
         </div>
         <nav class="toolbar" aria-label="Workspace actions">
@@ -39,13 +39,13 @@
         <section class="editor-region" aria-label="SQL workspace">
           <div class="panel editor-workbench">
             <div class="editor-tabbar" role="tablist" aria-label="SQL workbench views">
-              <button id="editor-tab-source" type="button" role="tab" data-editor-view="source" aria-controls="editor-source" aria-selected="false">
+              <button id="editor-tab-source" type="button" role="tab" tabindex="-1" data-editor-view="source" aria-controls="editor-source" aria-selected="false">
                 Source <output id="query-size">0 lines</output>
               </button>
-              <button id="editor-tab-lens" type="button" role="tab" data-editor-view="lens" aria-controls="editor-lens" aria-selected="true">
+              <button id="editor-tab-lens" type="button" role="tab" tabindex="0" data-editor-view="lens" aria-controls="editor-lens" aria-selected="true">
                 Query Lens <output id="lens-caption">Formatted and numbered</output>
               </button>
-              <button id="editor-tab-schema" type="button" role="tab" data-editor-view="schema" aria-controls="editor-schema" aria-selected="false">
+              <button id="editor-tab-schema" type="button" role="tab" tabindex="-1" data-editor-view="schema" aria-controls="editor-schema" aria-selected="false">
                 Schema <output id="schema-size">0 tables</output>
               </button>
             </div>
@@ -60,10 +60,10 @@
 
             <section id="editor-lens" class="editor-view lens-panel active" role="tabpanel" aria-labelledby="editor-tab-lens">
               <div class="lens-ide" data-testid="query-lens-ide">
-                <div id="lens-overview" class="lens-overview" aria-live="polite"></div>
+                <div id="lens-overview" class="lens-overview"></div>
                 <div class="lens-editor-shell">
-                  <pre id="formatted-output" data-testid="formatted-output" class="formatted-output query-lens" tabindex="0"></pre>
-                  <div id="lens-minimap" class="lens-minimap" aria-label="Query lens minimap"></div>
+                  <pre id="formatted-output" data-testid="formatted-output" class="formatted-output query-lens" role="listbox" aria-label="Query Lens lines" tabindex="0"></pre>
+                  <div id="lens-minimap" class="lens-minimap" aria-hidden="true"></div>
                 </div>
               </div>
             </section>
@@ -78,7 +78,7 @@
           </div>
         </section>
 
-        <div id="workspace-resizer" class="workspace-resizer" role="separator" aria-label="Resize SQL workbench" aria-orientation="vertical" tabindex="0"></div>
+        <div id="workspace-resizer" class="workspace-resizer" role="separator" aria-label="Resize SQL workbench" aria-orientation="vertical" aria-valuemin="380" aria-valuemax="720" aria-valuenow="420" aria-valuetext="420 pixels" tabindex="0"></div>
 
         <section class="analysis-region" aria-label="SQL analysis cockpit">
           <section id="workspace-empty" data-testid="workspace-empty" class="workspace-empty" aria-label="Ready for SQL" hidden>
@@ -104,16 +104,16 @@
               <span>No telemetry</span>
             </div>
           </section>
-          <div class="summary-grid" id="summary-grid" data-testid="summary-grid" aria-live="polite"></div>
-          <div id="focus-strip" data-testid="focus-strip" class="focus-strip" aria-live="polite">
+          <div class="summary-grid" id="summary-grid" data-testid="summary-grid"></div>
+          <div id="focus-strip" data-testid="focus-strip" class="focus-strip">
             <div id="perspective-switch" class="perspective-switch" role="tablist" aria-label="Atlas perspective"></div>
-            <aside id="briefing-board" data-testid="briefing-board" class="briefing-board" aria-live="polite"></aside>
+            <aside id="briefing-board" data-testid="briefing-board" class="briefing-board"></aside>
           </div>
 
           <div class="modebar" role="tablist" aria-label="Analysis modes">
-            <button id="tab-atlas" type="button" role="tab" aria-controls="view-atlas" aria-selected="true">Atlas</button>
-            <button id="tab-fix" type="button" role="tab" aria-controls="view-fix" aria-selected="false">Repair</button>
-            <button id="tab-inspect" type="button" role="tab" aria-controls="view-inspect" aria-selected="false">Evidence</button>
+            <button id="tab-atlas" type="button" role="tab" tabindex="0" aria-controls="view-atlas" aria-selected="true">Atlas</button>
+            <button id="tab-fix" type="button" role="tab" tabindex="-1" aria-controls="view-fix" aria-selected="false">Repair</button>
+            <button id="tab-inspect" type="button" role="tab" tabindex="-1" aria-controls="view-inspect" aria-selected="false">Evidence</button>
           </div>
 
           <section id="view-atlas" class="view active" role="tabpanel" aria-labelledby="tab-atlas">
@@ -138,9 +138,9 @@
               </div>
               <div id="theater-stage" data-testid="theater-stage" class="theater-stage atlas-stage">
                 <div class="atlas-canvas-wrap">
-                  <canvas id="theater-canvas" data-testid="theater-canvas" role="img" aria-label="Interactive SQL lineage and data-motion atlas"></canvas>
-                  <aside id="atlas-evidence-popover" data-testid="atlas-evidence-popover" class="atlas-evidence-popover" role="region" aria-label="Selected Atlas evidence" aria-live="polite" hidden></aside>
-                  <details id="atlas-navigator" data-testid="atlas-navigator" class="atlas-navigator" aria-live="polite"></details>
+                  <canvas id="theater-canvas" data-testid="theater-canvas" aria-hidden="true"></canvas>
+                  <div id="atlas-evidence-popover" data-testid="atlas-evidence-popover" class="atlas-evidence-popover" role="dialog" aria-labelledby="atlas-evidence-title" hidden></div>
+                  <details id="atlas-navigator" data-testid="atlas-navigator" class="atlas-navigator"></details>
                   <details id="atlas-filters" class="atlas-filters">
                     <summary>Visibility <span id="atlas-visible-count">5/5</span></summary>
                     <div class="atlas-filter-menu" aria-label="Atlas item filters">
@@ -152,8 +152,37 @@
                     </div>
                   </details>
                 </div>
-                <aside id="inspect-board" data-testid="inspect-board" class="inspect-board" aria-live="polite"></aside>
+                <aside id="inspect-board" data-testid="inspect-board" class="inspect-board"></aside>
               </div>
+              <section id="atlas-accessible-view" data-testid="atlas-accessible-view" class="atlas-accessible-view" aria-labelledby="atlas-accessible-title">
+                <header class="atlas-accessible-header">
+                  <div>
+                    <span>Non-canvas equivalent</span>
+                    <h3 id="atlas-accessible-title">Accessible Atlas</h3>
+                  </div>
+                  <output id="atlas-accessible-caption">No semantic nodes</output>
+                </header>
+                <p id="atlas-accessible-help" class="atlas-accessible-help">The node column is one tab stop. Use Arrow Up/Down, Home, or End to move and select a node, synchronizing the visual Atlas, Query Lens, inspector, diagnostics, and route state. Then Tab to Evidence actions; use Open SQL evidence to move focus to the linked source lines.</p>
+                <div class="atlas-accessible-table-wrap" role="region" aria-label="Scrollable semantic node table" tabindex="0">
+                  <table class="atlas-accessible-table" aria-describedby="atlas-accessible-help">
+                    <thead>
+                      <tr>
+                        <th scope="col">Node and identity</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Source</th>
+                        <th scope="col">Risk</th>
+                        <th scope="col">Metric and grain</th>
+                        <th scope="col">Incoming</th>
+                        <th scope="col">Outgoing</th>
+                        <th scope="col">SQL evidence and route</th>
+                      </tr>
+                    </thead>
+                    <tbody id="atlas-accessible-body">
+                      <tr><td colspan="8">Analyze SQL to populate the semantic node table.</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
               <div id="flow-list" class="flow-list motion-ribbon"></div>
             </div>
           </section>
@@ -182,7 +211,7 @@
                   <section class="flight-sql-panel" aria-labelledby="rewrite-title">
                     <h3 id="rewrite-title">Parameterized rewrite</h3>
                     <pre id="rewrite-output" tabindex="0"></pre>
-                    <div id="rewrite-notes" class="rewrite-notes" aria-label="Rewrite notes"></div>
+                    <div id="rewrite-notes" class="rewrite-notes" role="region" aria-label="Rewrite notes" tabindex="0"></div>
                   </section>
                 </div>
               </div>
@@ -196,7 +225,7 @@
                   <h2>Diagnostics</h2>
                   <output id="findings-caption">0 findings</output>
                 </div>
-                <div id="findings-list" class="findings-list"></div>
+                <div id="findings-list" class="findings-list" role="region" aria-label="Scrollable diagnostics" tabindex="0"></div>
               </div>
               <div class="panel trace-panel">
                 <div class="panel-header">
@@ -211,7 +240,7 @@
           <div class="sr-only" aria-hidden="true">
             <output id="briefing-caption">Waiting for SQL</output>
             <output id="map-caption">No query analyzed</output>
-            <button id="theater-toggle-button" type="button">Expand</button>
+            <button id="theater-toggle-button" type="button" disabled>Expand</button>
             <strong id="theater-node-label">Result</strong>
             <strong id="theater-node-line">derived</strong>
             <strong id="theater-node-risk">info</strong>

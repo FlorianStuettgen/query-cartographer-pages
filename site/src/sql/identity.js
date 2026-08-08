@@ -2,6 +2,7 @@ import { normalizeIdentifier, tokenize, tokensToText } from "./tokenizer.js";
 
 export const IDENTITY_SCHEMA_VERSION = "v1";
 export const IDENTITY_NAMESPACE = "q02a";
+export const CANONICAL_SOURCE_MODEL_ID_PATTERN = /^q02a-v1-source-model-[0-9a-f]{16}(?:-r(?:0[2-9]|[1-9][0-9]+))?$/;
 const STABLE_DIGEST_BITS = 16;
 
 export function canonicalClauseText(value) {

@@ -92,6 +92,7 @@ const elements = {
   clear: document.querySelector("#clear-button"),
   theme: document.querySelector("#theme-button"),
   utilityMenu: document.querySelector(".utility-menu"),
+  utilityMenuSummary: document.querySelector(".utility-menu > summary"),
   emptyWorkspace: document.querySelector("#workspace-empty"),
   summary: document.querySelector("#summary-grid"),
   focus: document.querySelector("#focus-strip"),
@@ -104,6 +105,9 @@ const elements = {
   atlasVisibleCount: document.querySelector("#atlas-visible-count"),
   atlasCanvasWrap: document.querySelector(".atlas-canvas-wrap"),
   atlasEvidence: document.querySelector("#atlas-evidence-popover"),
+  atlasAccessibleBody: document.querySelector("#atlas-accessible-body"),
+  atlasAccessibleCaption: document.querySelector("#atlas-accessible-caption"),
+  editorTablist: document.querySelector(".editor-tabbar[role='tablist']"),
   editorTabs: [...document.querySelectorAll("[data-editor-view]")],
   editorViews: [...document.querySelectorAll(".editor-view")],
   workspace: document.querySelector(".workspace"),
@@ -135,6 +139,7 @@ const elements = {
   rewriteNotes: document.querySelector("#rewrite-notes"),
   copyFormatted: document.querySelector("#copy-formatted-button"),
   copyRewrite: document.querySelector("#copy-rewrite-button"),
+  modeTablist: document.querySelector(".modebar[role='tablist']"),
   tabs: [...document.querySelectorAll(".modebar [role='tab']")],
   panels: [...document.querySelectorAll(".analysis-region > [role='tabpanel']")]
 };
@@ -157,6 +162,8 @@ let editorView = "lens";
 let inspectorPreference = null;
 let atlasEvidenceAnchor = null;
 let atlasEvidenceOpen = false;
+let atlasEvidenceReturnFocus = null;
+let atlasEvidenceFrame = 0;
 const perspectiveConfig = {
   decision: { label: "Decision", audienceKey: "manager", layer: "risk" },
   metrics: { label: "Metrics", audienceKey: "analyst", layer: "metrics" },
@@ -169,6 +176,7 @@ const atlasFilters = {
   grain: true,
   select: true
 };
+const WORKSPACE_RESIZER_BREAKPOINT = 980;
 
 boot();
 
@@ -182,6 +190,7 @@ function boot() {
   pushHistory("Initial query");
   analyze();
   activateEditorView(elements.sql.value.trim() ? "lens" : "source");
+  syncWorkspaceResizerState();
 }
 
 function bindEvents() {
@@ -211,8 +220,13 @@ function bindEvents() {
   });
 
   elements.utilityMenu?.addEventListener("click", (event) => {
-    if (event.target.closest("button")) elements.utilityMenu.open = false;
+    if (!event.target.closest("button")) return;
+    elements.utilityMenu.open = false;
+    syncUtilityMenuModality();
+    elements.utilityMenuSummary?.focus({ preventScroll: true });
   });
+  elements.utilityMenu?.addEventListener("toggle", syncUtilityMenuModality);
+  syncUtilityMenuModality();
 
   elements.exportMarkdown.addEventListener("click", createBrowserExportHandler({
     format: BROWSER_EXPORT_FORMATS.markdown,
@@ -243,15 +257,28 @@ function bindEvents() {
   elements.sql.addEventListener("input", scheduleHistorySnapshot);
   elements.schema.addEventListener("input", scheduleHistorySnapshot);
   document.addEventListener("keydown", handleHistoryShortcut);
+  document.addEventListener("keydown", handleDismissalKey);
 
   for (const tab of elements.editorTabs) {
     tab.addEventListener("click", () => activateEditorView(tab.dataset.editorView));
   }
+  elements.editorTablist?.addEventListener("keydown", (event) => {
+    handleRovingTabKey(event, elements.editorTabs, (tab) => activateEditorView(tab.dataset.editorView));
+  });
   bindWorkspaceResizer();
 
   for (const tab of elements.tabs) {
     tab.addEventListener("click", () => activateTab(tab.id.replace("tab-", "")));
   }
+  elements.modeTablist?.addEventListener("keydown", (event) => {
+    handleRovingTabKey(event, elements.tabs, (tab) => activateTab(tab.id.replace("tab-", "")));
+  });
+  elements.perspectiveSwitch.addEventListener("keydown", (event) => {
+    const tabs = [...elements.perspectiveSwitch.querySelectorAll("[role='tab']")];
+    handleRovingTabKey(event, tabs, (tab) => setPerspectiveMode(tab.dataset.perspective));
+  });
+  elements.formatted.addEventListener("keydown", handleLensKeydown);
+  elements.atlasAccessibleBody.addEventListener("keydown", handleAccessibleAtlasKeydown);
 
   elements.atlasLayerSelect.addEventListener("change", () => setAtlasLayer(elements.atlasLayerSelect.value));
 
@@ -260,11 +287,44 @@ function bindEvents() {
     if (!input) return;
     setAtlasFilter(input.dataset.atlasFilter, input.checked);
   });
+  for (const [disclosure, otherDisclosure] of [
+    [elements.atlasNavigator, elements.atlasFilters],
+    [elements.atlasFilters, elements.atlasNavigator]
+  ]) {
+    disclosure.addEventListener("toggle", () => {
+      if (disclosure.open) otherDisclosure.open = false;
+    });
+  }
 
   document.addEventListener("click", (event) => {
     const closeEvidence = event.target.closest("[data-close-atlas-evidence]");
     if (closeEvidence) {
-      hideAtlasEvidencePopover();
+      hideAtlasEvidencePopover({ restoreFocus: true });
+      return;
+    }
+
+    const openSqlEvidence = event.target.closest(".atlas-open-sql");
+    if (openSqlEvidence) {
+      openRawSqlEvidence(openSqlEvidence.dataset.registryId);
+      return;
+    }
+
+    const openAtlasEvidence = event.target.closest(".atlas-open-evidence");
+    if (openAtlasEvidence) {
+      activateSemanticTarget(openAtlasEvidence.dataset.registryId, {
+        preserveMode: true,
+        evidenceOpener: openAtlasEvidence,
+        moveEvidenceFocus: true
+      });
+      return;
+    }
+
+    const accessibleNode = event.target.closest(".atlas-node-select");
+    if (accessibleNode) {
+      activateSemanticTarget(accessibleNode.dataset.registryId, {
+        preserveMode: true,
+        evidenceOpener: accessibleNode
+      });
       return;
     }
 
@@ -277,7 +337,7 @@ function bindEvents() {
       return;
     }
 
-    const perspective = event.target.closest("[data-perspective]");
+    const perspective = event.target.closest("button[data-perspective]");
     if (perspective) {
       setPerspectiveMode(perspective.dataset.perspective);
       return;
@@ -291,12 +351,18 @@ function bindEvents() {
 
     const modeTarget = event.target.closest("[data-mode]");
     if (modeTarget) {
-      activateTab(modeTarget.dataset.mode);
+      const mode = modeTarget.dataset.mode;
+      const focusModeTab = elements.atlasEvidence.contains(modeTarget);
+      activateTab(mode);
+      if (focusModeTab) {
+        document.querySelector(`#tab-${escapeCssString(mode)}`)?.focus({ preventScroll: true });
+        return;
+      }
     }
 
     const atlasFocus = event.target.closest("[data-atlas-focus]");
     if (atlasFocus) {
-      setAtlasFocus(atlasFocus.dataset.atlasFocus, atlasFocus.dataset.registryId);
+      setAtlasFocus(atlasFocus.dataset.atlasFocus, atlasFocus.dataset.registryId, atlasFocus);
       return;
     }
 
@@ -309,17 +375,155 @@ function bindEvents() {
 
     const target = event.target.closest("[data-registry-id]");
     if (!target) return;
-    activateSemanticTarget(target.dataset.registryId);
+    activateSemanticTarget(target.dataset.registryId, { focusOrigin: target });
   });
+}
+
+function handleRovingTabKey(event, tabs, activate) {
+  const current = event.target.closest("[role='tab']");
+  if (!current || !tabs.includes(current)) return;
+  const supported = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
+  if (!supported.includes(event.key)) return;
+  event.preventDefault();
+  const currentIndex = tabs.indexOf(current);
+  const nextIndex = event.key === "Home"
+    ? 0
+    : event.key === "End"
+      ? tabs.length - 1
+      : (currentIndex + (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1) + tabs.length) % tabs.length;
+  const next = tabs[nextIndex];
+  activate(next);
+  next.focus({ preventScroll: true });
+  revealKeyboardFocus(next);
+  requestAnimationFrame(() => {
+    if (document.activeElement === next) revealKeyboardFocus(next);
+  });
+}
+
+function revealKeyboardFocus(element) {
+  element.scrollIntoView({ block: "nearest", inline: "nearest" });
+  const rect = element.getBoundingClientRect();
+  const style = getComputedStyle(element);
+  const outlineWidth = Number.parseFloat(style.outlineWidth) || 0;
+  const outlineOffset = Number.parseFloat(style.outlineOffset) || 0;
+  const outlineExtent = Math.max(
+    0,
+    outlineWidth + outlineOffset
+  );
+  const inset = Math.max(1, outlineExtent);
+  const left = rect.left - outlineExtent;
+  const right = rect.right + outlineExtent;
+  const top = rect.top - outlineExtent;
+  const bottom = rect.bottom + outlineExtent;
+  const deltaX = left < inset
+    ? left - inset
+    : right > window.innerWidth - inset
+      ? right - window.innerWidth + inset
+      : 0;
+  const deltaY = top < inset
+    ? top - inset
+    : bottom > window.innerHeight - inset
+      ? bottom - window.innerHeight + inset
+      : 0;
+  if (deltaX || deltaY) window.scrollBy({ left: deltaX, top: deltaY, behavior: "auto" });
+}
+
+function handleDismissalKey(event) {
+  if (event.key !== "Escape") return;
+  if (atlasEvidenceOpen && !elements.atlasEvidence.hidden) {
+    event.preventDefault();
+    hideAtlasEvidencePopover({ restoreFocus: true });
+    return;
+  }
+  const details = event.target.closest?.("details[open]");
+  if (!details) return;
+  event.preventDefault();
+  details.open = false;
+  if (details === elements.utilityMenu) syncUtilityMenuModality();
+  details.querySelector(":scope > summary")?.focus({ preventScroll: true });
+}
+
+function syncUtilityMenuModality() {
+  if (!elements.workspace) return;
+  elements.workspace.inert = Boolean(elements.utilityMenu?.open);
+}
+
+function handleLensKeydown(event) {
+  const rows = [...elements.formatted.querySelectorAll("[role='option'][data-lens-line]")];
+  if (!rows.length) return;
+  const focusedRow = event.target.closest?.("[role='option']");
+  const movementAnchor = focusedRow
+    || rows.find((row) => row.getAttribute("aria-selected") === "true")
+    || rows.find((row) => row.classList.contains("is-active"));
+  const activeIndex = rows.indexOf(movementAnchor);
+  const movement = {
+    ArrowDown: Math.min(rows.length - 1, activeIndex + 1),
+    ArrowUp: activeIndex < 0 ? rows.length - 1 : Math.max(0, activeIndex - 1),
+    Home: 0,
+    End: rows.length - 1
+  };
+  if (Object.hasOwn(movement, event.key)) {
+    event.preventDefault();
+    focusLensRow(rows[movement[event.key]], { announce: true });
+    return;
+  }
+  if (!["Enter", " "].includes(event.key)) return;
+  event.preventDefault();
+  if (!focusedRow) {
+    elements.status.textContent = "Choose a Query Lens line with Arrow Up, Arrow Down, Home, or End before selecting";
+    return;
+  }
+  activateLensRow(focusedRow);
+}
+
+function focusLensRow(row, options = {}) {
+  if (!row) return;
+  row.scrollIntoView({ block: "nearest" });
+  row.focus({ preventScroll: true });
+  if (options.announce) {
+    const severity = capitalize(row.dataset.severity || "info");
+    elements.status.textContent = `${severity} severity / ${lensRawLineLabel(row)}; Enter or Space to select`;
+  }
+}
+
+function setActiveLensRow(row, options = {}) {
+  if (!row) return;
+  elements.formatted.querySelectorAll("[role='option']").forEach((candidate) => {
+    candidate.setAttribute("aria-selected", String(candidate === row));
+    candidate.classList.toggle("is-active", candidate === row);
+  });
+  row.scrollIntoView({ block: "nearest" });
+  if (options.focus) row.focus({ preventScroll: true });
+  if (options.announce) {
+    const severity = capitalize(row.dataset.severity || "info");
+    elements.status.textContent = `${severity} severity / ${lensRawLineLabel(row)}`;
+  }
+}
+
+function lensRawLineLabel(row) {
+  const start = row.dataset.rawLine || row.dataset.lensLine;
+  const end = row.dataset.rawLineEnd || start;
+  return start === end ? `raw line ${start}` : `raw lines ${start}-${end}`;
+}
+
+function openRawSqlEvidence(targetId) {
+  if (!currentAnalysis) return;
+  activateEditorView("source");
+  activateSemanticTarget(targetId, { preserveMode: true, focusRawSql: true });
+  const entry = currentAnalysis.sourceModel.registry.get(canonicalizeTargetId(currentAnalysis, targetId));
+  elements.status.textContent = entry?.lineStart
+    ? `${entry.label}: source lines ${entry.lineStart}-${entry.lineEnd || entry.lineStart}`
+    : `${entry?.label || "Selection"}: no direct SQL line`;
 }
 
 function scheduleAnalyze() {
   window.clearTimeout(analyzeTimer);
   const sqlLines = elements.sql.value ? elements.sql.value.split(/\r?\n/).length : 0;
   elements.analyze.disabled = sqlLines === 0;
-  elements.status.textContent = sqlLines
+  const pendingStatus = sqlLines
     ? `Reading ${sqlLines.toLocaleString()} line${sqlLines === 1 ? "" : "s"} locally...`
     : "Ready for SQL / local-only analysis";
+  if (elements.status.textContent !== pendingStatus) elements.status.textContent = pendingStatus;
   analyzeTimer = window.setTimeout(analyze, 180);
   updateInputCounters();
 }
@@ -405,6 +609,8 @@ function handleHistoryShortcut(event) {
 }
 
 function analyze({ revealEvidence = false } = {}) {
+  window.clearTimeout(analyzeTimer);
+  analyzeTimer = 0;
   const sql = elements.sql.value;
   const schema = elements.schema.value;
   currentAnalysis = analyzeQuery(sql, schema);
@@ -450,6 +656,8 @@ function renderEmptyWorkspace() {
   elements.analyze.disabled = true;
   elements.status.textContent = "Ready for SQL / local-only analysis";
   elements.lensCaption.textContent = "Waiting for SQL";
+  elements.atlasAccessibleCaption.textContent = "No semantic nodes";
+  replaceTrustedMarkup(elements.atlasAccessibleBody, `<tr><td colspan="8">Analyze SQL to populate the semantic node table.</td></tr>`);
   selectedTargetId = "";
   hideAtlasEvidencePopover();
   theater?.destroy();
@@ -481,6 +689,7 @@ function renderSummary(analysis) {
       ${card.registryId ? `data-registry-id="${escapeHtmlAttribute(card.registryId)}"` : ""}
       ${card.flightId ? `data-flight-id="${escapeHtmlAttribute(card.flightId)}"` : ""}>
       <span>${escapeHtml(card.label)}</span>
+      <b class="metric-tone">${escapeHtml(`${card.tone} status`)}</b>
       <strong>${escapeHtml(card.value)}</strong>
       <small>${escapeHtml(card.detail)}</small>
     </button>
@@ -501,15 +710,24 @@ function buildScorecards(analysis) {
 
 function renderFocusStrip(analysis) {
   if (!analysis) return;
-  replaceTrustedMarkup(elements.perspectiveSwitch, Object.entries(perspectiveConfig).map(([perspective, config]) => `
-    <button
-      type="button"
-      role="tab"
-      data-perspective="${perspective}"
-      aria-selected="${perspective === selectedPerspective}">
-      ${config.label}
-    </button>
-  `).join(""));
+  if (!elements.perspectiveSwitch.querySelector("[role='tab']")) {
+    replaceTrustedMarkup(elements.perspectiveSwitch, Object.entries(perspectiveConfig).map(([perspective, config]) => `
+      <button
+        type="button"
+        role="tab"
+        tabindex="${perspective === selectedPerspective ? "0" : "-1"}"
+        data-perspective="${perspective}"
+        aria-controls="view-atlas"
+        aria-selected="${perspective === selectedPerspective}">
+        ${config.label}
+      </button>
+    `).join(""));
+  }
+  elements.perspectiveSwitch.querySelectorAll("[role='tab']").forEach((tab) => {
+    const selected = tab.dataset.perspective === selectedPerspective;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  });
 }
 
 function renderBriefing(analysis) {
@@ -546,12 +764,14 @@ function briefingHotspotForPerspective(analysis, perspective) {
     const metric = analysis.profile.metrics.find((candidate) => ["high", "medium"].includes(candidate.tone))
       || analysis.profile.metrics[0];
     if (metric) {
+      const targetId = canonicalizeTargetId(analysis, metric.id);
+      if (!targetId) return null;
       return {
         kind: "finding",
         prompt: "Metric focus",
         label: metric.risk || metric.label,
         tone: metric.tone,
-        targetId: metric.id
+        targetId
       };
     }
   }
@@ -618,30 +838,42 @@ function renderAtlasNavigator(analysis) {
     })
     .filter((route) => route.id)
     .slice(0, 4);
-  const metricRoutes = analysis.profile.metrics.slice(0, 5).map((metric) => ({
-    id: metric.id,
-    label: metric.label,
-    detail: metric.type,
-    tone: metric.tone,
-    focusIds: [metric.id, ...metric.dependsOnIds]
-  }));
-  const sourceRoutes = analysis.profile.sources.slice(0, 5).map((source) => ({
-    id: source.id,
-    label: source.alias || source.name,
-    detail: `${formatRows(source.rows)} rows`,
-    tone: source.tone,
-    focusIds: [source.id]
-  }));
+  const metricRoutes = analysis.profile.metrics.slice(0, 5).map((metric) => {
+    const focusIds = [...new Set([metric.id, ...metric.dependsOnIds]
+      .map((id) => canonicalizeTargetId(analysis, id))
+      .filter(Boolean))];
+    return {
+      id: canonicalizeTargetId(analysis, metric.id) || focusIds[0] || "",
+      label: metric.label,
+      detail: metric.type,
+      tone: metric.tone,
+      focusIds
+    };
+  }).filter((route) => route.id && route.focusIds.length);
+  const sourceRoutes = analysis.profile.sources.slice(0, 5).map((source) => {
+    const id = canonicalizeTargetId(analysis, source.id);
+    return {
+      id,
+      label: source.alias || source.name,
+      detail: `${formatRows(source.rows)} rows`,
+      tone: source.tone,
+      focusIds: [id].filter(Boolean)
+    };
+  }).filter((route) => route.id);
   const actionRoutes = analysis.flightPlan.actions
     .filter((action) => action.targetId)
     .slice(0, 4)
-    .map((action) => ({
-      id: action.targetId,
-      label: action.title,
-      detail: `risk -${action.riskDelta}`,
-      tone: action.severity,
-      focusIds: [action.targetId]
-    }));
+    .map((action) => {
+      const id = canonicalizeTargetId(analysis, action.targetId);
+      return {
+        id,
+        label: action.title,
+        detail: `risk -${action.riskDelta}`,
+        tone: action.severity,
+        focusIds: [id].filter(Boolean)
+      };
+    })
+    .filter((route) => route.id);
   const clauseRoutes = analysis.sourceModel.traceLines
     .filter((entry) => ["join", "where", "group", "having", "order", "limit"].includes(entry.kind))
     .slice(0, 6)
@@ -652,12 +884,13 @@ function renderAtlasNavigator(analysis) {
       tone: entry.severity,
       focusIds: [entry.id, ...(entry.predecessors ?? []).slice(0, 3), ...(entry.descendants ?? []).slice(0, 3)]
     }));
-  const grainRoutes = analysis.profile.grain.targetId ? [{
-    id: analysis.profile.grain.targetId,
+  const grainId = canonicalizeTargetId(analysis, analysis.profile.grain.targetId);
+  const grainRoutes = grainId ? [{
+    id: grainId,
     label: analysis.profile.grain.label,
     detail: analysis.profile.grain.detail,
     tone: analysis.profile.grain.tone,
-    focusIds: [analysis.profile.grain.targetId]
+    focusIds: [grainId]
   }] : [];
   const stageRoutes = buildCteStageRoutes(analysis);
 
@@ -672,7 +905,7 @@ function renderAtlasNavigator(analysis) {
   replaceTrustedMarkup(elements.atlasNavigator, `
     <summary>${perspectiveLabel} routes <span>${routeCount}</span></summary>
     <div class="atlas-route-menu">
-      <button class="route-reset" type="button" data-atlas-focus="">Show full query</button>
+      <button class="route-reset" type="button" data-atlas-focus="" aria-pressed="${atlasFocusMode === "all"}">Show full query</button>
       ${groups.map(([label, routes]) => renderRouteGroup(label, routes)).join("")}
     </div>
   `);
@@ -688,9 +921,10 @@ function renderRouteGroup(label, routes) {
           class="route-chip risk-${safeClassToken(route.tone)}"
           type="button"
           data-atlas-focus="${escapeHtmlAttribute(route.focusIds.join(","))}"
-          data-registry-id="${escapeHtmlAttribute(route.id)}">
+          data-registry-id="${escapeHtmlAttribute(route.id)}"
+          aria-pressed="${atlasFocusMode === "route" && sameIdSet(route.focusIds, atlasFocusIds)}">
           <strong>${escapeHtml(route.label)}</strong>
-          <small>${escapeHtml(route.detail)}</small>
+          <small>${escapeHtml(`${route.detail} / ${route.tone} risk`)}</small>
         </button>
       `).join("")}
     </section>
@@ -732,7 +966,7 @@ function renderFlow(analysis) {
 
   replaceTrustedMarkup(elements.flow, analysis.flow.steps.map((entry, index) => `
     <button class="flow-step risk-${safeClassToken(entry.risk)}" type="button" data-flow-index="${index}">
-      <span class="step-index">${String(index + 1).padStart(2, "0")} ${escapeHtml(entry.phase)}</span>
+      <span class="step-index">${String(index + 1).padStart(2, "0")} ${escapeHtml(entry.phase)} / ${escapeHtml(entry.risk)} risk</span>
       <strong>${escapeHtml(entry.label)}</strong>
       <small>${escapeHtml(formatRows(entry.beforeRows))} -> ${escapeHtml(formatRows(entry.afterRows))}</small>
     </button>
@@ -744,7 +978,10 @@ function renderFindings(analysis) {
     const registryId = findRegistryIdForEvidence(analysis, entry.evidence);
     return `
       <article class="finding risk-${safeClassToken(entry.severity)}" ${registryId ? `data-registry-id="${escapeHtmlAttribute(registryId)}"` : ""}>
-        <div class="severity">${escapeHtml(entry.severity)} / ${escapeHtml(entry.category)}</div>
+        <div class="severity">
+          <span>${escapeHtml(entry.severity)} / ${escapeHtml(entry.category)}</span>
+          <span class="finding-current-state">Current diagnostic</span>
+        </div>
         <h3>${escapeHtml(entry.title)}</h3>
         <p>${escapeHtml(entry.detail)}</p>
         ${entry.evidence ? `<p><code>${escapeHtml(entry.evidence)}</code></p>` : ""}
@@ -776,6 +1013,7 @@ function renderFlight(analysis) {
     <button
       class="flight-card risk-${safeClassToken(action.severity)} ${index === 0 ? "is-active" : ""}"
       type="button"
+      aria-pressed="${index === 0}"
       data-flight-id="${escapeHtmlAttribute(action.id)}"
       ${action.targetId ? `data-registry-id="${escapeHtmlAttribute(action.targetId)}"` : ""}>
       <span class="flight-rank">${String(index + 1).padStart(2, "0")} ${escapeHtml(action.severity)}</span>
@@ -816,6 +1054,7 @@ function selectFlightAction(actionId) {
   selectedFlightActionId = action.id;
   elements.flightActions.querySelectorAll("[data-flight-id]").forEach((node) => {
     node.classList.toggle("is-active", node.dataset.flightId === action.id);
+    node.setAttribute("aria-pressed", String(node.dataset.flightId === action.id));
   });
 
   if (action.targetId) activateSemanticTarget(action.targetId, { preserveMode: true });
@@ -846,38 +1085,56 @@ function renderQueryLens(analysis) {
     diagnostic: ""
   }));
   replaceTrustedMarkup(elements.lensMinimap, rows.map((row) => `
-    <button
+    <span
       class="lens-mini-line lens-risk-${safeClassToken(row.severity)}"
-      type="button"
       title="${escapeHtmlAttribute(row.diagnostic || `${row.scopeLabel} line ${row.lineNumber}`)}"
       data-lens-line="${row.lineNumber}"
       data-raw-line="${row.rawLine || row.lineNumber}"
+      data-raw-line-end="${row.rawLineEnd || row.rawLine || row.lineNumber}"
       ${row.targetId ? `data-registry-id="${escapeHtmlAttribute(row.targetId)}"` : ""}>
-    </button>
+    </span>
   `).join(""));
+  const firstRow = elements.formatted.querySelector("[role='option']");
+  if (firstRow) {
+    firstRow.setAttribute("aria-selected", "true");
+  }
   renderLensOverview(analysis, rows);
   elements.lensCaption.textContent = `${rows.length} lines`;
 }
 
 function lensText(analysis) {
-  const hasSyntaxDamage = analysis.diagnosis.findings.some((finding) => finding.category === "syntax" && finding.severity === "high");
-  return hasSyntaxDamage ? analysis.ast.sql : analysis.formattedSql;
+  return lensUsesRawSql(analysis) ? analysis.ast.sql : analysis.formattedSql;
+}
+
+function lensUsesRawSql(analysis) {
+  return analysis.diagnosis.findings.some((finding) => finding.category === "syntax" && finding.severity === "high");
 }
 
 function renderLensRow(row) {
+  const scopeLabel = String(row.scopeLabel || row.scope || "SQL").trim() || "SQL";
+  const rawLine = row.rawLine || row.lineNumber;
+  const rawLineEnd = row.rawLineEnd || rawLine;
+  const rawLineContext = rawLineEnd === rawLine ? `raw line ${rawLine}` : `raw lines ${rawLine}-${rawLineEnd}`;
   const title = [
-    row.scopeLabel ? `${row.scopeLabel} scope` : "",
-    row.rawLine ? `raw line ${row.rawLine}` : "",
+    `${scopeLabel} scope`,
+    rawLineContext,
     row.diagnostic
   ].filter(Boolean).join(" / ");
+  const accessibleSql = compactText(row.text || "Blank SQL line", 120);
 
   return [
     `<span class="lens-line lens-risk-${safeClassToken(row.severity)}"`,
+    ` role="option"`,
+    ` tabindex="-1"`,
+    ` aria-selected="false"`,
+    ` aria-label="${escapeHtmlAttribute(`${capitalize(row.severity)} severity, ${title}, SQL: ${accessibleSql}`)}"`,
+    ` data-severity="${safeClassToken(row.severity)}"`,
     ` data-lens-line="${row.lineNumber}"`,
-    ` data-raw-line="${row.rawLine || row.lineNumber}"`,
+    ` data-raw-line="${rawLine}"`,
+    ` data-raw-line-end="${rawLineEnd}"`,
     row.targetId ? ` data-registry-id="${escapeHtmlAttribute(row.targetId)}"` : "",
     ` title="${escapeHtmlAttribute(title)}">`,
-    `<span class="lens-rail"><span class="lens-no">${String(row.lineNumber).padStart(4, " ")}</span><span class="lens-marker" aria-hidden="true"></span></span>`,
+    `<span class="lens-rail"><span class="lens-no">${String(row.lineNumber).padStart(4, " ")}</span><span class="lens-marker" aria-hidden="true">${escapeHtml(String(row.severity || "info").slice(0, 1).toUpperCase())}</span></span>`,
     `<span class="lens-scope">${escapeHtml(row.scope)}</span>`,
     `<code>${highlightSqlLine(row.text || " ")}</code>`,
     `</span>`
@@ -888,7 +1145,7 @@ function renderLensOverview(analysis, rows) {
   const highRows = rows.filter((row) => row.severity === "high").length;
   const riskRows = rows.filter((row) => ["high", "medium"].includes(row.severity)).length;
   const linkedRows = rows.filter((row) => row.targetId).length;
-  const recovery = lensText(analysis) === analysis.ast.sql;
+  const recovery = lensUsesRawSql(analysis);
 
   replaceTrustedMarkup(elements.lensOverview, `
     <div class="lens-statusline">
@@ -903,7 +1160,27 @@ function renderLensOverview(analysis, rows) {
 }
 
 function buildLensRows(analysis) {
-  const lines = lensText(analysis).split(/\r?\n/);
+  const text = lensText(analysis);
+  const usesRawSql = lensUsesRawSql(analysis);
+  const lines = text ? text.split(/\r?\n/) : [];
+  const lineRecords = lines.map((lineText, index) => {
+    const lineNumber = index + 1;
+    if (usesRawSql) {
+      return { text: lineText, lineNumber, rawLineStart: lineNumber, rawLineEnd: lineNumber };
+    }
+    const mapping = analysis.formattedLineMap?.[index];
+    if (
+      !mapping
+      || mapping.formattedLine !== lineNumber
+      || !Number.isSafeInteger(mapping.rawLineStart)
+      || !Number.isSafeInteger(mapping.rawLineEnd)
+      || mapping.rawLineStart < 1
+      || mapping.rawLineEnd < mapping.rawLineStart
+    ) {
+      throw new Error(`Formatted Query Lens line ${lineNumber} has no valid raw-source mapping`);
+    }
+    return { text: lineText, lineNumber, rawLineStart: mapping.rawLineStart, rawLineEnd: mapping.rawLineEnd };
+  });
   const entries = analysis.sourceModel.traceLines;
   const entriesByRawLine = new Map();
 
@@ -911,29 +1188,54 @@ function buildLensRows(analysis) {
     const start = entry.lineStart ?? 0;
     const end = entry.lineEnd ?? start;
     for (let line = start; line <= end; line += 1) {
-      const current = entriesByRawLine.get(line);
-      if (!current || severityRank(entry.severity) > severityRank(current.severity)) {
-        entriesByRawLine.set(line, entry);
-      }
+      const candidates = entriesByRawLine.get(line) || [];
+      if (!candidates.includes(entry)) candidates.push(entry);
+      entriesByRawLine.set(line, candidates);
     }
   }
 
   let previousScope = "";
-  return lines.map((text, index) => {
-    const lineNumber = index + 1;
-    const entry = entriesByRawLine.get(lineNumber) || findEntryForLensText(text, entries);
-    const finding = findFindingForLensText(analysis, text)
-      || (entry ? findFindingForEntry(analysis, entry) : null);
+  return lineRecords.map(({ text: lineText, lineNumber, rawLineStart, rawLineEnd }) => {
+    const mappedEntries = [];
+    for (let rawLine = rawLineStart; rawLine <= rawLineEnd; rawLine += 1) {
+      for (const candidate of entriesByRawLine.get(rawLine) || []) {
+        if (!mappedEntries.includes(candidate)) mappedEntries.push(candidate);
+      }
+    }
+    const inferredScope = inferLensScope(lineText, null, previousScope);
+    const scopeMatchedEntries = inferredScope === "SQL"
+      ? mappedEntries
+      : mappedEntries.filter((candidate) => lensKindLabel(candidate.kind) === inferredScope);
+    const evidenceMatchedEntries = scopeMatchedEntries.filter((candidate) => lensLineContainsEntryEvidence(lineText, candidate));
+    const mappedEvidenceMatchedEntries = mappedEntries.filter((candidate) => lensLineContainsEntryEvidence(lineText, candidate));
+    const enclosingCteEntries = mappedEntries.filter((candidate) => (
+      candidate.kind === "cte"
+      && Number.isSafeInteger(candidate.lineStart)
+      && Number.isSafeInteger(candidate.lineEnd)
+      && candidate.lineStart <= rawLineStart
+      && candidate.lineEnd >= rawLineEnd
+    ));
+    const entry = evidenceMatchedEntries.length === 1
+      ? evidenceMatchedEntries[0]
+      : scopeMatchedEntries.length === 1
+        ? scopeMatchedEntries[0]
+        : mappedEvidenceMatchedEntries.length === 1
+          ? mappedEvidenceMatchedEntries[0]
+          : enclosingCteEntries.length === 1
+            ? enclosingCteEntries[0]
+            : null;
+    const finding = findFindingForLensContext(analysis, lineText, entry, rawLineStart, rawLineEnd);
     const severity = maxSeverity(entry?.severity || "info", finding?.severity || "info");
-    const scopeLabel = inferLensScope(text, entry);
+    const scopeLabel = inferLensScope(lineText, entry, previousScope);
     const scope = scopeLabel !== previousScope ? scopeLabel : "";
     previousScope = scopeLabel || previousScope;
 
     return {
       lineNumber,
-      rawLine: entry?.lineStart || lineNumber,
-      text,
-      targetId: entry?.id || findRegistryIdForEvidence(analysis, finding?.evidence),
+      rawLine: rawLineStart,
+      rawLineEnd,
+      text: lineText,
+      targetId: entry?.id || findScopeCompatibleFindingTarget(analysis, finding, inferredScope),
       scope,
       scopeLabel,
       severity,
@@ -958,39 +1260,52 @@ function buildLensAnchors(analysis) {
   })));
 }
 
-function findEntryForLensText(line, entries) {
+function findFindingForLensContext(analysis, line, entry, rawLineStart, rawLineEnd) {
   const normalized = normalizeEvidence(line);
-  if (normalized.length < 3) return null;
-
-  return entries.find((entry) => {
-    const evidence = normalizeEvidence(entry.text);
-    return evidence.length >= 4 && (normalized.includes(evidence) || evidence.includes(normalized));
-  }) || null;
+  const exactLineCandidates = normalized.length >= 4
+    ? analysis.diagnosis.findings.filter((finding) => normalizeEvidence(finding.evidence) === normalized)
+    : [];
+  const explicitlyBound = exactLineCandidates.find((finding) => {
+    const match = /^line\s+(\d+)\b/iu.exec(String(finding.detail || "").trim());
+    const findingLine = Number(match?.[1]);
+    return Number.isSafeInteger(findingLine) && findingLine >= rawLineStart && findingLine <= rawLineEnd;
+  });
+  if (explicitlyBound) return explicitlyBound;
+  if (exactLineCandidates.length) {
+    const matchingRawLines = analysis.ast.sql.split(/\r?\n/)
+      .filter((rawLine) => normalizeEvidence(rawLine) === normalized).length;
+    if (matchingRawLines === 1) return exactLineCandidates.sort(compareLensFindings)[0];
+  }
+  if (!entry) return null;
+  const entryFinding = findFindingForEntry(analysis, entry);
+  return entryFinding && analysis.sourceModel.traceLines
+    .filter((candidate) => normalizeEvidence(candidate.text) === normalizeEvidence(entry.text)).length === 1
+    ? entryFinding
+    : null;
 }
 
-function findFindingForLensText(analysis, line) {
-  const normalized = normalizeEvidence(line);
-  if (normalized.length < 4) return null;
-  return analysis.diagnosis.findings.find((finding) => {
-    const evidence = normalizeEvidence(finding.evidence);
-    return evidence.length >= 4 && (normalized.includes(evidence) || evidence.includes(normalized));
-  }) || null;
+function compareLensFindings(left, right) {
+  return severityRank(right.severity) - severityRank(left.severity)
+    || String(left.title || "").localeCompare(String(right.title || ""), "en");
 }
 
-function inferLensScope(line, entry) {
-  if (entry?.kind) return lensKindLabel(entry.kind);
+function inferLensScope(line, entry, previousScope = "") {
   const text = String(line || "").trim().toLowerCase();
-  if (!text) return "";
+  if (!text) return "SQL";
   if (text.startsWith("with")) return "CTE";
+  if (/^\)?\s*,?\s*[a-z_][\w$]*\s+as\s*\(/iu.test(text)) return "CTE";
   if (text.startsWith("select")) return "SELECT";
   if (text.startsWith("from")) return "FROM";
-  if (text.includes(" join ")) return "JOIN";
-  if (text.startsWith("where") || text.startsWith("and ") || text.startsWith("or ")) return "FILTER";
+  if (/^(?:(?:inner|left|right|full|cross)\s+)?join\b/iu.test(text) || text.includes(" join ")) return "JOIN";
+  if (text.startsWith("where")) return "FILTER";
+  if (text.startsWith("and ") || text.startsWith("or ")) {
+    return ["JOIN", "HAVING", "FILTER"].includes(previousScope) ? previousScope : "FILTER";
+  }
   if (text.startsWith("group by")) return "GRAIN";
   if (text.startsWith("having")) return "HAVING";
   if (text.startsWith("order by")) return "ORDER";
   if (text.startsWith("limit") || text.startsWith("offset")) return "BOUND";
-  return "SQL";
+  return previousScope || (entry?.kind ? lensKindLabel(entry.kind) : "SQL");
 }
 
 function lensKindLabel(kind) {
@@ -1009,12 +1324,21 @@ function lensKindLabel(kind) {
 }
 
 function activateLensRow(row) {
-  const targetId = row.dataset.registryId;
+  const lensLine = Number(row.dataset.lensLine);
+  const selectionRow = elements.formatted.contains(row)
+    ? row
+    : Number.isSafeInteger(lensLine) && lensLine > 0
+      ? elements.formatted.querySelector(`[role="option"][data-lens-line="${lensLine}"]`)
+      : null;
+  if (!selectionRow) return;
+  const targetId = selectionRow.dataset.registryId;
   if (targetId) {
-    activateSemanticTarget(targetId);
+    activateSemanticTarget(targetId, { lensSelectionRow: selectionRow });
     return;
   }
-  activateLineNumber(Number(row.dataset.rawLine || row.dataset.lensLine));
+  activateLineNumber(Number(selectionRow.dataset.rawLine || selectionRow.dataset.lensLine), {
+    lensSelectionRow: selectionRow
+  });
 }
 
 function highlightSqlLine(line) {
@@ -1059,8 +1383,9 @@ function updateCaptions(analysis) {
   elements.findingsCaption.textContent = `${analysis.diagnosis.findings.length} findings`;
 }
 
-function renderTheater(analysis) {
+function renderTheater(analysis, options = {}) {
   theater?.destroy();
+  if (!selectedTargetId) selectedTargetId = analysis?.sourceModel?.resultId || "";
   const focusIds = atlasFocusMode === "route"
     ? atlasFocusIds
     : atlasFocusMode === "all"
@@ -1078,7 +1403,25 @@ function renderTheater(analysis) {
     showSelectionLabel: true,
     onSelectionAnchor: handleAtlasSelectionAnchor
   });
-  if (!selectedTargetId) selectedTargetId = currentAnalysis?.sourceModel?.resultId || "";
+  let visibleNodeIds = theater.visibleNodeIds();
+  if (!visibleNodeIds.length && atlasFocusMode === "route" && options.routeFallbackApplied !== true) {
+    atlasFocusIds = [];
+    atlasFocusMode = "all";
+    renderAtlasNavigator(analysis);
+    renderTheater(analysis, { ...options, routeFallbackApplied: true });
+    return;
+  }
+  const traceFallbackId = analysis.sourceModel.traceLines.find(({ id }) => visibleNodeIds.includes(id))?.id || "";
+  const visibleSelection = visibleNodeIds.includes(selectedTargetId)
+    ? selectedTargetId
+    : traceFallbackId || visibleNodeIds[0] || "";
+  if (visibleSelection && visibleSelection !== selectedTargetId) {
+    synchronizeVisibleSemanticTarget(analysis, visibleSelection);
+    if (options.announceReconciliation === true) {
+      const selectedLabel = analysis.sourceModel.registry.get(visibleSelection)?.label || "visible node";
+      elements.status.textContent = visibleText(`Selection moved to ${selectedLabel} to match the visible Atlas scope`);
+    }
+  }
   theater.select(selectedTargetId);
   const stats = theater.stats();
   const scope = stats.focused < stats.visible
@@ -1086,6 +1429,191 @@ function renderTheater(analysis) {
     : `${stats.visible} nodes`;
   elements.theaterCaption.textContent = `${perspectiveConfig[selectedPerspective].label} / ${capitalize(atlasLayer)} / ${scope}`;
   updateTheaterRail(selectedTargetId);
+  visibleNodeIds = theater.visibleNodeIds();
+  renderAccessibleAtlas(analysis, visibleNodeIds);
+}
+
+function synchronizeVisibleSemanticTarget(analysis, targetId) {
+  const canonicalTargetId = canonicalizeTargetId(analysis, targetId);
+  if (!canonicalTargetId) return;
+  selectedTargetId = canonicalTargetId;
+  activateRegistryTarget(document, canonicalTargetId, analysis.sourceModel);
+  selectRawSqlLines(elements.sql, analysis.sourceModel, canonicalTargetId);
+  updateTheaterRail(canonicalTargetId);
+  renderInspectBoard(analysis, canonicalTargetId);
+  highlightLensTarget(canonicalTargetId);
+  hideAtlasEvidencePopover();
+}
+
+function renderAccessibleAtlas(analysis, nodeIds) {
+  const entries = nodeIds
+    .map((id) => analysis.sourceModel.registry.get(id))
+    .filter(Boolean);
+  const rovingTargetId = entries.some(({ id }) => id === selectedTargetId)
+    ? selectedTargetId
+    : entries[0]?.id || "";
+  const perspectiveLabel = perspectiveConfig[selectedPerspective]?.label || "Decision";
+  const scopeLabel = atlasFocusMode === "route"
+    ? "selected route"
+    : atlasFocusMode === "all"
+      ? "full query"
+      : `${perspectiveLabel.toLowerCase()} perspective`;
+  elements.atlasAccessibleCaption.textContent = `${entries.length} of ${analysis.sourceModel.entries.length} nodes / ${scopeLabel} / ${capitalize(atlasLayer)} layer`;
+
+  if (!entries.length) {
+    replaceTrustedMarkup(elements.atlasAccessibleBody, `<tr><td colspan="8">No nodes match the current Atlas scope and visibility filters.</td></tr>`);
+    return;
+  }
+
+  replaceTrustedMarkup(elements.atlasAccessibleBody, entries.map((entry) => (
+    renderAccessibleAtlasRow(analysis, entry, scopeLabel, rovingTargetId)
+  )).join(""));
+  updateAccessibleAtlasSelection(selectedTargetId);
+}
+
+function renderAccessibleAtlasRow(analysis, entry, scopeLabel, rovingTargetId) {
+  const selected = entry.id === selectedTargetId;
+  const directMetrics = analysis.profile.metrics.filter((metric) => (
+    metricRegistryIds(analysis, metric).includes(entry.id)
+  ));
+  const metricSourceIds = new Set(directMetrics.flatMap((metric) => (
+    validRegistryIds(analysis, metric.dependsOnIds)
+  )));
+  const directSources = analysis.profile.sources.filter((source) => (
+    [entry.id, ...entry.predecessors, ...entry.descendants, ...metricSourceIds]
+      .includes(profileRegistryId(analysis, source))
+  ));
+  const sourceLabel = directSources.length
+    ? directSources.map((source) => source.alias ? `${source.name} as ${source.alias}` : source.name).join(", ")
+    : ["source", "cte"].includes(entry.kind)
+      ? entry.text || entry.label
+      : "No direct source binding";
+  const metricLabel = directMetrics.length
+    ? directMetrics.map(({ label }) => label).join(", ")
+    : "No direct metric binding";
+  const grainApplies = entry.id === canonicalizeTargetId(analysis, analysis.profile.grain.targetId)
+    || directMetrics.length > 0
+    || ["group", "having", "projection", "result"].includes(entry.kind);
+  const grainLabel = grainApplies ? analysis.profile.grain.label : "No direct grain binding";
+  const lineLabel = entry.lineStart
+    ? `Lines ${entry.lineStart}-${entry.lineEnd || entry.lineStart}`
+    : "Derived node";
+  const evidence = compactText(entry.text || entry.label, 180);
+  const routeLabel = `${scopeLabel}; ${capitalize(atlasLayer)} layer; ${selected ? "selected node" : "available node"}`;
+
+  return `
+    <tr data-atlas-accessible-row data-registry-id="${escapeHtmlAttribute(entry.id)}" aria-selected="${selected}" class="${selected ? "is-selected" : ""}">
+      <th scope="row">
+        <button
+          class="atlas-node-select"
+          type="button"
+          tabindex="${entry.id === rovingTargetId ? "0" : "-1"}"
+          data-registry-id="${escapeHtmlAttribute(entry.id)}"
+          aria-pressed="${selected}"
+          aria-controls="atlas-evidence-popover inspect-board formatted-output">
+          <strong>${escapeHtml(entry.label)}</strong>
+          <span class="atlas-selection-state" ${selected ? "" : "hidden"}>Selected</span>
+          <code>${escapeHtml(entry.id)}</code>
+        </button>
+      </th>
+      <td>${escapeHtml(entry.kind)}</td>
+      <td>${escapeHtml(compactText(sourceLabel, 180))}</td>
+      <td><span class="risk-text risk-${safeClassToken(entry.severity)}">${escapeHtml(`${capitalize(entry.severity)} risk`)}</span></td>
+      <td>
+        <dl class="atlas-metric-grain">
+          <div><dt>Metric</dt><dd data-atlas-value="metric">${escapeHtml(compactText(metricLabel, 160))}</dd></div>
+          <div><dt>Grain</dt><dd data-atlas-value="grain">${escapeHtml(compactText(grainLabel, 160))}</dd></div>
+        </dl>
+      </td>
+      <td>${renderAccessibleRelationships(analysis, entry.predecessors, "Query start")}</td>
+      <td>${renderAccessibleRelationships(analysis, entry.descendants, "Query result")}</td>
+      <td>
+        <span>${escapeHtml(routeLabel)}</span>
+        <code>${escapeHtml(`${lineLabel}: ${evidence}`)}</code>
+        <details class="atlas-accessible-actions">
+          <summary tabindex="${selected ? "0" : "-1"}">Evidence actions</summary>
+          <div>
+            <button class="atlas-open-evidence" type="button" data-registry-id="${escapeHtmlAttribute(entry.id)}">Open evidence</button>
+            ${entry.lineStart ? `<button class="atlas-open-sql" type="button" data-registry-id="${escapeHtmlAttribute(entry.id)}">Open SQL evidence</button>` : ""}
+          </div>
+        </details>
+      </td>
+    </tr>
+  `;
+}
+
+function sameIdSet(left, right) {
+  return left.length === right.length && left.every((id) => right.includes(id));
+}
+
+function renderAccessibleRelationships(analysis, targetIds, emptyLabel) {
+  if (!targetIds.length) return `<span>${escapeHtml(emptyLabel)}</span>`;
+  return `<ul>${targetIds.map((id) => {
+    const target = analysis.sourceModel.registry.get(id);
+    return `<li><span>${escapeHtml(target?.label || "Unknown node")}</span><code>${escapeHtml(id)}</code></li>`;
+  }).join("")}</ul>`;
+}
+
+function updateAccessibleAtlasSelection(targetId) {
+  const rows = [...elements.atlasAccessibleBody.querySelectorAll("[data-atlas-accessible-row]")];
+  const selectedRow = rows.find((row) => row.dataset.registryId === targetId);
+  const rovingRow = selectedRow || rows[0];
+  rows.forEach((row) => {
+    const selected = row.dataset.registryId === targetId;
+    row.classList.toggle("is-selected", selected);
+    row.setAttribute("aria-selected", String(selected));
+    const button = row.querySelector(".atlas-node-select");
+    button?.setAttribute("aria-pressed", String(selected));
+    if (button) button.tabIndex = row === rovingRow ? 0 : -1;
+    const actions = row.querySelector(".atlas-accessible-actions");
+    const actionSummary = actions?.querySelector("summary");
+    if (actionSummary) actionSummary.tabIndex = selected ? 0 : -1;
+    if (actions && !selected) actions.open = false;
+    const state = row.querySelector(".atlas-selection-state");
+    if (state) state.hidden = !selected;
+  });
+}
+
+function lensLineContainsEntryEvidence(line, entry) {
+  const lineTokens = lensEvidenceTokens(line);
+  const evidenceTokens = lensEvidenceTokens(entry?.text);
+  if (!lineTokens.length || !evidenceTokens.length || evidenceTokens.length > lineTokens.length) return false;
+  return lineTokens.some((_, index) => evidenceTokens.every((token, offset) => lineTokens[index + offset] === token));
+}
+
+function lensEvidenceTokens(value) {
+  return String(value || "").toLowerCase().match(
+    /'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|[\p{L}_][\p{L}\p{N}_$]*|\d+(?:\.\d+)?|<>|!=|<=|>=|[(),.*=<>+\/-]/gu
+  ) || [];
+}
+
+function findScopeCompatibleFindingTarget(analysis, finding, inferredScope) {
+  const targetId = findRegistryIdForEvidence(analysis, finding?.evidence);
+  if (!targetId) return "";
+  const target = analysis.sourceModel.registry.get(targetId);
+  return inferredScope === "SQL" || lensKindLabel(target?.kind) === inferredScope ? targetId : "";
+}
+
+function handleAccessibleAtlasKeydown(event) {
+  const activeButton = event.target.closest?.(".atlas-node-select");
+  if (!activeButton) return;
+  const buttons = [...elements.atlasAccessibleBody.querySelectorAll(".atlas-node-select")];
+  const currentIndex = buttons.indexOf(activeButton);
+  if (currentIndex < 0) return;
+  let nextIndex = currentIndex;
+  if (event.key === "ArrowDown") nextIndex = Math.min(buttons.length - 1, currentIndex + 1);
+  else if (event.key === "ArrowUp") nextIndex = Math.max(0, currentIndex - 1);
+  else if (event.key === "Home") nextIndex = 0;
+  else if (event.key === "End") nextIndex = buttons.length - 1;
+  else return;
+  event.preventDefault();
+  const nextButton = buttons[nextIndex];
+  activateSemanticTarget(nextButton.dataset.registryId, {
+    preserveMode: true,
+    evidenceOpener: nextButton
+  });
+  nextButton.focus({ preventScroll: true });
+  nextButton.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 function perspectiveFocusIds(analysis, perspective) {
@@ -1139,8 +1667,16 @@ function handleAtlasSelectionAnchor(anchor) {
 
 function positionAtlasEvidencePopover() {
   if (!atlasEvidenceOpen || elements.atlasEvidence.hidden) return;
+  elements.atlasCanvasWrap.scrollIntoView({ block: "nearest", inline: "nearest" });
+  const wrapRect = elements.atlasCanvasWrap.getBoundingClientRect();
   const wrapWidth = elements.atlasCanvasWrap.clientWidth;
   const wrapHeight = elements.atlasCanvasWrap.clientHeight;
+  const viewportTop = Math.max(0, -wrapRect.top);
+  const viewportBottom = Math.min(wrapHeight, window.innerHeight - wrapRect.top);
+  const minimumTop = Math.max(48, viewportTop + 12);
+  const maximumBottom = Math.min(wrapHeight - 12, viewportBottom - 12);
+  const availableHeight = Math.max(1, maximumBottom - minimumTop);
+  elements.atlasEvidence.style.maxHeight = `${Math.round(availableHeight)}px`;
   const popWidth = elements.atlasEvidence.offsetWidth;
   const popHeight = elements.atlasEvidence.offsetHeight;
   const anchor = atlasEvidenceAnchor || { x: wrapWidth / 2, y: wrapHeight / 2, radius: 18 };
@@ -1149,7 +1685,8 @@ function positionAtlasEvidencePopover() {
     ? anchor.x - popWidth - anchor.radius - 18
     : anchor.x + anchor.radius + 18;
   const left = Math.max(12, Math.min(wrapWidth - popWidth - 12, preferredLeft));
-  const top = Math.max(48, Math.min(wrapHeight - popHeight - 12, anchor.y - popHeight / 2));
+  const maximumTop = Math.max(minimumTop, maximumBottom - popHeight);
+  const top = Math.max(minimumTop, Math.min(maximumTop, anchor.y - popHeight / 2));
   elements.atlasEvidence.style.left = `${Math.round(left)}px`;
   elements.atlasEvidence.style.top = `${Math.round(top)}px`;
   elements.atlasEvidence.classList.toggle("place-left", placeLeft);
@@ -1170,16 +1707,31 @@ function updateAtlasLayerButtons() {
 
 function setAtlasFilter(filter, enabled) {
   if (!(filter in atlasFilters)) return;
+  const previousFocusMode = atlasFocusMode;
+  const previousTargetId = selectedTargetId;
   atlasFilters[filter] = Boolean(enabled);
   updateAtlasFilterButtons();
   if (currentAnalysis) {
     renderTheater(currentAnalysis);
-    elements.status.textContent = `${capitalize(filter)} ${atlasFilters[filter] ? "enabled" : "disabled"} in Atlas`;
+    const transitions = [];
+    if (previousFocusMode === "route" && atlasFocusMode === "all") transitions.push("route reset to full query");
+    if (previousTargetId !== selectedTargetId) {
+      const selectedLabel = currentAnalysis.sourceModel.registry.get(selectedTargetId)?.label || "visible node";
+      transitions.push(`selection moved to ${selectedLabel}`);
+    }
+    const transitionText = transitions.length ? `; ${transitions.join("; ")}` : "";
+    elements.status.textContent = visibleText(
+      `${capitalize(filter)} ${atlasFilters[filter] ? "enabled" : "disabled"} in Atlas${transitionText}`
+    );
   }
 }
 
-function setAtlasFocus(rawIds, primaryId = "") {
-  atlasFocusIds = String(rawIds || "").split(",").filter(Boolean);
+function setAtlasFocus(rawIds, primaryId = "", opener = null) {
+  const requestedFocusIds = [...new Set(String(rawIds || "").split(",")
+    .map((id) => canonicalizeTargetId(currentAnalysis, id))
+    .filter(Boolean))];
+  const canonicalPrimaryId = canonicalizeTargetId(currentAnalysis, primaryId);
+  atlasFocusIds = requestedFocusIds;
   atlasFocusMode = atlasFocusIds.length ? "route" : "all";
   if (atlasFocusIds.length && atlasLayer === "motion") {
     atlasLayer = "metrics";
@@ -1187,7 +1739,27 @@ function setAtlasFocus(rawIds, primaryId = "") {
   }
   if (currentAnalysis) {
     renderTheater(currentAnalysis);
-    if (primaryId) activateSemanticTarget(primaryId, { preserveMode: true });
+    renderAtlasNavigator(currentAnalysis);
+    const replacementOpener = [...elements.atlasNavigator.querySelectorAll("[data-atlas-focus]")].find((button) => (
+      button.dataset.atlasFocus === requestedFocusIds.join(",")
+      && (button.dataset.registryId || "") === canonicalPrimaryId
+    ));
+    const routeSurvived = atlasFocusMode === "route" && sameIdSet(atlasFocusIds, requestedFocusIds);
+    const focusOpener = routeSurvived && replacementOpener
+      ? replacementOpener
+      : opener
+        ? elements.atlasNavigator.querySelector(".route-reset")
+        : null;
+    if (opener && focusOpener) focusOpener.focus({ preventScroll: true });
+    if (canonicalPrimaryId) {
+      const visibleNodeIds = theater?.visibleNodeIds() ?? [];
+      if (routeSurvived && visibleNodeIds.includes(canonicalPrimaryId)) {
+        activateSemanticTarget(canonicalPrimaryId, {
+          preserveMode: true,
+          evidenceOpener: focusOpener || null
+        });
+      }
+    }
     elements.status.textContent = atlasFocusIds.length
       ? `Atlas route isolated ${atlasFocusIds.length} semantic node${atlasFocusIds.length === 1 ? "" : "s"}`
       : "Atlas route reset to full query";
@@ -1208,6 +1780,7 @@ function setInspectorCollapsed(collapsed) {
   elements.theaterStage.classList.toggle("inspect-collapsed", isCollapsed);
   const button = elements.inspect.querySelector("[data-minimize-card]");
   button?.setAttribute("aria-label", isCollapsed ? "Expand inspector" : "Collapse inspector");
+  button?.setAttribute("aria-expanded", String(!isCollapsed));
   window.setTimeout(() => theater?.resize(), 0);
 }
 
@@ -1234,33 +1807,51 @@ function renderAtlasEvidencePopover(analysis, targetId, options = {}) {
   if (!entry) return;
   const finding = findContextFinding(analysis, entry);
   const action = findContextAction(analysis, entry, finding);
+  const hasRepairReview = analysis.diagnosis.findings.length > 0 || analysis.flightPlan.actions.length > 0;
   const flowStep = findContextFlowStep(analysis, entry);
   const rows = buildPerspectiveEvidenceRows(analysis, entry, finding, action, flowStep);
   const config = perspectiveConfig[selectedPerspective] || perspectiveConfig.decision;
   const tone = finding?.severity || entry.severity || "info";
   const lineLabel = entry.lineStart ? `Raw line ${entry.lineStart}` : "Derived query node";
+  const focusWasInside = elements.atlasEvidence.contains(document.activeElement);
+  if (options.evidenceOpener instanceof HTMLElement && options.evidenceOpener.isConnected) {
+    atlasEvidenceReturnFocus = options.evidenceOpener;
+  }
 
   elements.atlasEvidence.dataset.perspective = selectedPerspective;
   replaceTrustedMarkup(elements.atlasEvidence, `
     <header class="atlas-evidence-head risk-${safeClassToken(tone)}">
       <div>
         <span>${config.label} evidence</span>
-        <strong>${escapeHtml(entry.label || "Query result")}</strong>
-        <small>${escapeHtml(`${lineLabel} / ${entry.kind}`)}</small>
+        <strong id="atlas-evidence-title">${escapeHtml(entry.label || "Query result")}</strong>
+        <small>${escapeHtml(`${lineLabel} / ${entry.kind} / ${tone} risk`)}</small>
       </div>
       <button type="button" data-close-atlas-evidence aria-label="Close evidence popup">&times;</button>
     </header>
-    <div class="atlas-evidence-body">
+    <div class="atlas-evidence-body" role="region" aria-label="Evidence details" tabindex="0">
       ${rows.map(renderAtlasEvidenceRow).join("")}
     </div>
     <footer class="atlas-evidence-actions">
       <button type="button" data-mode="inspect">Full evidence</button>
-      ${action ? `<button type="button" class="primary" data-mode="fix">Repair plan</button>` : ""}
+      ${hasRepairReview ? `<button type="button" class="primary" data-mode="fix">Repair plan</button>` : ""}
     </footer>
   `);
   atlasEvidenceOpen = options.open !== false;
   elements.atlasEvidence.hidden = !atlasEvidenceOpen;
-  if (atlasEvidenceOpen) window.requestAnimationFrame(positionAtlasEvidencePopover);
+  if (atlasEvidenceFrame) {
+    window.cancelAnimationFrame(atlasEvidenceFrame);
+    atlasEvidenceFrame = 0;
+  }
+  if (atlasEvidenceOpen) {
+    atlasEvidenceFrame = window.requestAnimationFrame(() => {
+      atlasEvidenceFrame = 0;
+      if (!atlasEvidenceOpen || elements.atlasEvidence.hidden) return;
+      positionAtlasEvidencePopover();
+      if (options.moveFocus === true || focusWasInside) {
+        elements.atlasEvidence.querySelector("[data-close-atlas-evidence]")?.focus({ preventScroll: true });
+      }
+    });
+  }
 }
 
 function buildPerspectiveEvidenceRows(analysis, entry, finding, action, flowStep) {
@@ -1362,9 +1953,36 @@ function renderAtlasEvidenceRow(row) {
   `;
 }
 
-function hideAtlasEvidencePopover() {
+function hideAtlasEvidencePopover(options = {}) {
+  const returnFocus = atlasEvidenceReturnFocus;
+  const activeElement = document.activeElement;
+  const activeOutsidePopover = canReceiveFocus(activeElement)
+    && activeElement !== document.body
+    && !elements.atlasEvidence.contains(activeElement);
   atlasEvidenceOpen = false;
   elements.atlasEvidence.hidden = true;
+  atlasEvidenceReturnFocus = null;
+  if (atlasEvidenceFrame) {
+    window.cancelAnimationFrame(atlasEvidenceFrame);
+    atlasEvidenceFrame = 0;
+  }
+  if (!options.restoreFocus) return;
+  const fallback = elements.atlasAccessibleBody.querySelector(`.atlas-node-select[data-registry-id="${escapeCssString(selectedTargetId)}"]`);
+  const target = activeOutsidePopover
+    ? activeElement
+    : canReceiveFocus(returnFocus)
+      ? returnFocus
+      : canReceiveFocus(fallback)
+        ? fallback
+        : null;
+  target?.focus({ preventScroll: true });
+}
+
+function canReceiveFocus(target) {
+  if (!(target instanceof HTMLElement) || !target.isConnected || target.hidden || target.matches(":disabled")) return false;
+  if (target.closest("[hidden], [inert]")) return false;
+  const style = window.getComputedStyle(target);
+  return style.display !== "none" && style.visibility !== "hidden" && target.getClientRects().length > 0;
 }
 
 function compactText(value, maxLength) {
@@ -1403,26 +2021,69 @@ function findContextFlowStep(analysis, entry) {
 
 function activateSemanticTarget(targetId, options = {}) {
   if (!currentAnalysis) return;
-  const canonicalTargetId = canonicalizeTargetId(currentAnalysis, targetId);
+  let canonicalTargetId = canonicalizeTargetId(currentAnalysis, targetId);
   if (!canonicalTargetId) return;
-  selectedTargetId = canonicalTargetId;
-  const related = activateRegistryTarget(document, canonicalTargetId, currentAnalysis.sourceModel);
-  selectRawSqlLines(elements.sql, currentAnalysis.sourceModel, canonicalTargetId);
+  const inspectorFocusOrigin = options.focusOrigin instanceof HTMLElement
+    && elements.inspect.contains(options.focusOrigin)
+    && document.activeElement === options.focusOrigin
+    ? options.focusOrigin
+    : null;
+  const inspectorFocusClass = inspectorFocusOrigin
+    ? ["source-chip", "metric-lineage-card"].find((className) => inspectorFocusOrigin.classList.contains(className))
+    : null;
+  const inspectorFocusRegistryId = inspectorFocusOrigin?.dataset.registryId || "";
+  const routeResetForSelection = atlasFocusMode === "route" && !atlasFocusIds.includes(canonicalTargetId);
+  if (routeResetForSelection) {
+    atlasFocusIds = [];
+    atlasFocusMode = "all";
+    renderAtlasNavigator(currentAnalysis);
+    renderTheater(currentAnalysis);
+  }
   const atlasVisible = !document.querySelector("#view-atlas")?.hidden;
-  if (atlasVisible) ensureAtlasTargetVisible(currentAnalysis, canonicalTargetId);
+  if (atlasVisible) {
+    ensureAtlasTargetVisible(currentAnalysis, canonicalTargetId);
+    const visibleNodeIds = theater?.visibleNodeIds() ?? [];
+    if (visibleNodeIds.length && !visibleNodeIds.includes(canonicalTargetId)) {
+      canonicalTargetId = currentAnalysis.sourceModel.traceLines.find(({ id }) => visibleNodeIds.includes(id))?.id
+        || visibleNodeIds[0];
+    }
+  }
+  selectedTargetId = canonicalTargetId;
+  if (options.evidenceOpener instanceof HTMLElement && options.evidenceOpener.isConnected) {
+    atlasEvidenceReturnFocus = options.evidenceOpener;
+  }
+  const related = activateRegistryTarget(document, canonicalTargetId, currentAnalysis.sourceModel);
+  selectRawSqlLines(elements.sql, currentAnalysis.sourceModel, canonicalTargetId, { focus: options.focusRawSql === true });
   theater?.select(canonicalTargetId);
   updateTheaterRail(canonicalTargetId);
-  renderInspectBoard(currentAnalysis, canonicalTargetId);
+  renderInspectBoard(currentAnalysis, canonicalTargetId, {
+    pinnedSourceId: inspectorFocusClass === "source-chip" ? inspectorFocusRegistryId : "",
+    pinnedMetricId: inspectorFocusClass === "metric-lineage-card" ? inspectorFocusRegistryId : ""
+  });
+  if (inspectorFocusOrigin && inspectorFocusClass) {
+    const exactReplacement = elements.inspect.querySelector(`.${inspectorFocusClass}[data-registry-id="${escapeCssString(inspectorFocusRegistryId)}"]`);
+    const canonicalReplacement = elements.inspect.querySelector(`.${inspectorFocusClass}[data-registry-id="${escapeCssString(canonicalTargetId)}"]`);
+    (exactReplacement || canonicalReplacement)
+      ?.focus({ preventScroll: true });
+  }
   if (atlasVisible) {
-    renderAtlasEvidencePopover(currentAnalysis, canonicalTargetId, { open: true });
+    renderAtlasEvidencePopover(currentAnalysis, canonicalTargetId, {
+      open: true,
+      evidenceOpener: options.evidenceOpener,
+      moveFocus: options.moveEvidenceFocus === true
+    });
   } else {
     setInspectorCollapsed(false);
     hideAtlasEvidencePopover();
   }
-  highlightLensTarget(canonicalTargetId);
+  highlightLensTarget(canonicalTargetId, options.lensSelectionRow);
+  updateAccessibleAtlasSelection(canonicalTargetId);
   const active = currentAnalysis.sourceModel.registry.get(canonicalTargetId);
   if (active) {
-    elements.status.textContent = visibleText(`${active.label}: ${active.lineStart ? `raw line ${active.lineStart}` : "derived node"} (${related.length} linked)`);
+    const routeTransition = routeResetForSelection ? "; route reset to full query" : "";
+    elements.status.textContent = visibleText(
+      `${active.label}: ${active.lineStart ? `raw line ${active.lineStart}` : "derived node"} (${related.length} linked)${routeTransition}`
+    );
   }
   if (!options.preserveMode && document.querySelector("#view-atlas")?.hidden) activateTab("inspect");
 }
@@ -1434,6 +2095,7 @@ function ensureAtlasTargetVisible(analysis, targetId) {
   atlasFocusIds = expandRegistryNeighborhood(analysis, [canonicalTarget], 5, 24);
   atlasFocusMode = "route";
   renderTheater(analysis);
+  renderAtlasNavigator(analysis);
 }
 
 function renderInspectBoard(analysis, targetId, options = {}) {
@@ -1446,8 +2108,18 @@ function renderInspectBoard(analysis, targetId, options = {}) {
     : findFlowStepForEntry(analysis, entry);
   const predecessors = entry?.predecessors?.length ?? 0;
   const descendants = entry?.descendants?.length ?? 0;
-  const relatedMetrics = metricsForSelection(analysis, entry).slice(0, 4);
-  const relatedSources = sourcesForSelection(analysis, entry, relatedMetrics).slice(0, 6);
+  const relatedMetrics = pinInventoryItem(
+    metricsForSelection(analysis, entry),
+    analysis.profile.metrics,
+    options.pinnedMetricId,
+    (metric) => profileRegistryId(analysis, metric)
+  ).slice(0, 4);
+  const relatedSources = pinInventoryItem(
+    sourcesForSelection(analysis, entry, relatedMetrics),
+    analysis.profile.sources,
+    options.pinnedSourceId,
+    (source) => profileRegistryId(analysis, source)
+  ).slice(0, 6);
   const predecessorLabels = labelTargets(analysis, entry?.predecessors ?? []);
   const descendantLabels = labelTargets(analysis, entry?.descendants ?? []);
   const inspectorToggleLabel = elements.inspect.classList.contains("is-minimized")
@@ -1457,10 +2129,10 @@ function renderInspectBoard(analysis, targetId, options = {}) {
   replaceTrustedMarkup(elements.inspect, `
     <div class="card-minibar">
       <span>Inspect</span>
-      <button type="button" data-minimize-card aria-label="${escapeHtmlAttribute(inspectorToggleLabel)}">&#8250;</button>
+      <button type="button" data-minimize-card aria-label="${escapeHtmlAttribute(inspectorToggleLabel)}" aria-controls="inspect-board" aria-expanded="${!elements.inspect.classList.contains("is-minimized")}">&#8250;</button>
     </div>
     <section class="inspect-head risk-${safeClassToken(entry?.severity || finding?.severity || "info")}">
-      <span>${escapeHtml(entry?.kind || "result")}</span>
+      <span>${escapeHtml(`${entry?.kind || "result"} / ${entry?.severity || finding?.severity || "info"} risk`)}</span>
       <h3>${escapeHtml(entry?.label || "Result")}</h3>
       <p>${escapeHtml(entry?.lineStart ? `Raw line ${entry.lineStart}` : "Derived from the query model")}</p>
     </section>
@@ -1496,16 +2168,16 @@ function renderInspectBoard(analysis, targetId, options = {}) {
         <strong>${relatedSources.length}/${analysis.profile.sources.length}</strong>
       </summary>
       <div class="source-list">
-        ${relatedSources.map(renderSourceChip).join("") || `<div class="empty-compact">No source inventory for this selection.</div>`}
+        ${relatedSources.map((source) => renderSourceChip(analysis, source)).join("") || `<div class="empty-compact">No source inventory for this selection.</div>`}
       </div>
     </details>
-    <details class="inspect-rollup" ${entry?.kind === "projection" ? "open" : ""}>
+    <details class="inspect-rollup" ${entry?.kind === "projection" || options.pinnedMetricId ? "open" : ""}>
       <summary class="inspect-section-head">
         <span>Metric ETL Lineage</span>
         <strong>${relatedMetrics.length}/${analysis.profile.metrics.length}</strong>
       </summary>
       <div class="metric-lineage-list">
-        ${relatedMetrics.map(renderMetricLineageCard).join("") || `<div class="empty-compact">No metric-style projection is attached here.</div>`}
+        ${relatedMetrics.map((metric) => renderMetricLineageCard(analysis, metric)).join("") || `<div class="empty-compact">No metric-style projection is attached here.</div>`}
       </div>
     </details>
     <details class="inspect-rollup questions-strip">
@@ -1518,24 +2190,24 @@ function renderInspectBoard(analysis, targetId, options = {}) {
   `);
 }
 
-function renderSourceChip(source) {
+function renderSourceChip(analysis, source) {
   const name = source.alias ? `${source.name} as ${source.alias}` : source.name;
   return `
-    <button class="source-chip risk-${safeClassToken(source.tone)}" type="button" data-registry-id="${escapeHtmlAttribute(source.id)}">
-      <span>${escapeHtml(source.role)}</span>
+    <button class="source-chip risk-${safeClassToken(source.tone)}" type="button" data-registry-id="${escapeHtmlAttribute(profileRegistryId(analysis, source))}">
+      <span>${escapeHtml(`${source.role} / ${source.tone} risk`)}</span>
       <strong>${escapeHtml(name)}</strong>
       <small>${escapeHtml(formatRows(source.rows))} rows / ${escapeHtml(source.schemaStatus)} / ${escapeHtml(source.detail)}</small>
     </button>
   `;
 }
 
-function renderMetricLineageCard(metric) {
+function renderMetricLineageCard(analysis, metric) {
   const sourceText = metric.sources.length
     ? metric.sources.map((source) => `${source.table}.${source.column}`).join(" + ")
     : "source columns not statically resolved";
   return `
-    <button class="metric-lineage-card risk-${safeClassToken(metric.tone)}" type="button" data-registry-id="${escapeHtmlAttribute(metric.id)}">
-      <span>${escapeHtml(metric.type)}</span>
+    <button class="metric-lineage-card risk-${safeClassToken(metric.tone)}" type="button" data-registry-id="${escapeHtmlAttribute(profileRegistryId(analysis, metric))}">
+      <span>${escapeHtml(`${metric.type} / ${metric.tone} risk`)}</span>
       <strong>${escapeHtml(metric.label)}</strong>
       <small>${escapeHtml(metric.businessMeaning)}</small>
       <em>${escapeHtml(sourceText)}</em>
@@ -1546,22 +2218,39 @@ function renderMetricLineageCard(metric) {
 function metricsForSelection(analysis, entry) {
   if (!entry) return analysis.profile.metrics;
   const direct = analysis.profile.metrics.filter((metric) => {
-    return metric.id === entry.id
-      || metric.dependsOnIds.includes(entry.id)
-      || entry.predecessors?.includes(metric.id)
-      || entry.descendants?.includes(metric.id);
+    const metricIds = metricRegistryIds(analysis, metric);
+    return metricIds.includes(entry.id)
+      || metricIds.some((id) => entry.predecessors?.includes(id))
+      || metricIds.some((id) => entry.descendants?.includes(id));
   });
   if (direct.length) return direct;
-  if (entry.kind === "projection") return analysis.profile.metrics.filter((metric) => metric.id === entry.id);
+  if (entry.kind === "projection") {
+    return analysis.profile.metrics.filter((metric) => profileRegistryId(analysis, metric) === entry.id);
+  }
   return analysis.profile.metrics;
 }
 
 function sourcesForSelection(analysis, entry, metrics = []) {
-  const metricSourceIds = new Set(metrics.flatMap((metric) => metric.dependsOnIds));
+  const metricSourceIds = new Set(metrics.flatMap((metric) => validRegistryIds(analysis, metric.dependsOnIds)));
   const directIds = new Set([entry?.id, ...(entry?.predecessors ?? []), ...(entry?.descendants ?? []), ...metricSourceIds]);
-  const direct = analysis.profile.sources.filter((source) => directIds.has(source.id));
+  const direct = analysis.profile.sources.filter((source) => directIds.has(profileRegistryId(analysis, source)));
   if (direct.length) return direct;
   return analysis.profile.sources;
+}
+
+function profileRegistryId(analysis, item) {
+  return canonicalizeTargetId(analysis, item?.id);
+}
+
+function metricRegistryIds(analysis, metric) {
+  return validRegistryIds(analysis, [metric?.id, ...(metric?.dependsOnIds ?? [])]);
+}
+
+function pinInventoryItem(items, inventory, pinnedId, resolveId = (item) => item.id) {
+  if (!pinnedId) return items;
+  const pinned = inventory.find((item) => resolveId(item) === pinnedId);
+  if (!pinned) return items;
+  return [pinned, ...items.filter((item) => resolveId(item) !== pinnedId)];
 }
 
 function labelTargets(analysis, targetIds) {
@@ -1578,11 +2267,12 @@ function updateTheaterRail(targetId) {
   elements.theaterNodeRisk.textContent = entry?.severity || "info";
 }
 
-function highlightLensTarget(targetId) {
+function highlightLensTarget(targetId, preferredRow = null) {
   if (!currentAnalysis) return;
   const entry = currentAnalysis.sourceModel.registry.get(targetId);
   elements.formatted.querySelectorAll(".lens-line").forEach((node) => {
     node.classList.remove("is-active");
+    node.setAttribute("aria-selected", "false");
   });
   elements.lensMinimap.querySelectorAll(".lens-mini-line").forEach((node) => {
     node.classList.remove("is-active");
@@ -1608,29 +2298,52 @@ function highlightLensTarget(targetId) {
       if (!first) first = node;
     }
   }
-  first?.scrollIntoView({ block: "nearest" });
+  const selected = preferredRow instanceof HTMLElement
+    && elements.formatted.contains(preferredRow)
+    && (!targetId || preferredRow.dataset.registryId === targetId)
+    ? preferredRow
+    : first;
+  if (selected) {
+    selected.setAttribute("aria-selected", "true");
+    selected.scrollIntoView({ block: "nearest" });
+  }
 }
 
-function activateLineNumber(lineNumber) {
+function activateLineNumber(lineNumber, options = {}) {
   if (!Number.isFinite(lineNumber) || !currentAnalysis) return;
-  const entry = currentAnalysis.sourceModel.traceLines.find((item) => {
+  const requestedRow = options.lensSelectionRow instanceof HTMLElement
+    && elements.formatted.contains(options.lensSelectionRow)
+    ? options.lensSelectionRow
+    : null;
+  const entry = requestedRow ? null : currentAnalysis.sourceModel.traceLines.find((item) => {
     const start = item.lineStart ?? 0;
     const end = item.lineEnd ?? start;
     return lineNumber >= start && lineNumber <= end;
   });
 
   if (entry) {
-    activateSemanticTarget(entry.id);
+    activateSemanticTarget(entry.id, options);
     return;
   }
 
+  const requestedEnd = Number(requestedRow?.dataset.rawLineEnd || lineNumber);
   const rawLine = currentAnalysis.sourceModel.rawLines[lineNumber - 1];
-  if (!rawLine) return;
-  elements.sql.focus();
-  elements.sql.setSelectionRange(rawLine.start, rawLine.end);
-  highlightLensTarget("");
-  elements.formatted.querySelector(`[data-lens-line="${lineNumber}"]`)?.classList.add("is-active");
-  elements.status.textContent = `Raw line ${lineNumber}`;
+  const rawEndLine = Number.isSafeInteger(requestedEnd) && requestedEnd >= lineNumber
+    ? currentAnalysis.sourceModel.rawLines[requestedEnd - 1]
+    : rawLine;
+  if (!rawLine || !rawEndLine) return;
+  elements.sql.setSelectionRange(rawLine.start, rawEndLine.end);
+  highlightLensTarget("", requestedRow);
+  const lensRow = requestedRow || [...elements.formatted.querySelectorAll("[data-raw-line]")]
+    .find((row) => {
+      const start = Number(row.dataset.rawLine);
+      const end = Number(row.dataset.rawLineEnd || start);
+      return Number.isSafeInteger(start) && Number.isSafeInteger(end) && lineNumber >= start && lineNumber <= end;
+    });
+  if (lensRow) setActiveLensRow(lensRow);
+  elements.status.textContent = requestedEnd > lineNumber
+    ? `Raw lines ${lineNumber}-${requestedEnd}`
+    : `Raw line ${lineNumber}`;
 }
 
 function maxSeverity(a, b) {
@@ -1695,7 +2408,9 @@ function updateInputCounters() {
 function activateEditorView(name) {
   editorView = ["source", "lens", "schema"].includes(name) ? name : "lens";
   for (const tab of elements.editorTabs) {
-    tab.setAttribute("aria-selected", String(tab.dataset.editorView === editorView));
+    const selected = tab.dataset.editorView === editorView;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
   }
   for (const view of elements.editorViews) {
     const selected = view.id === `editor-${editorView}`;
@@ -1709,7 +2424,7 @@ function bindWorkspaceResizer() {
   let dragging = false;
 
   elements.workspaceResizer.addEventListener("pointerdown", (event) => {
-    if (window.innerWidth <= 900) return;
+    if (window.innerWidth <= WORKSPACE_RESIZER_BREAKPOINT) return;
     dragging = true;
     elements.workspaceResizer.setPointerCapture(event.pointerId);
     elements.workspaceResizer.classList.add("is-dragging");
@@ -1732,21 +2447,56 @@ function bindWorkspaceResizer() {
   elements.workspaceResizer.addEventListener("pointerup", stop);
   elements.workspaceResizer.addEventListener("pointercancel", stop);
   elements.workspaceResizer.addEventListener("keydown", (event) => {
-    if (!["ArrowLeft", "ArrowRight"].includes(event.key) || window.innerWidth <= 900) return;
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key) || window.innerWidth <= WORKSPACE_RESIZER_BREAKPOINT) return;
     event.preventDefault();
+    const workspaceWidth = elements.workspace.getBoundingClientRect().width;
     const current = document.querySelector(".editor-region")?.getBoundingClientRect().width || 420;
-    setEditorWidth(current + (event.key === "ArrowRight" ? 24 : -24), elements.workspace.getBoundingClientRect().width);
+    const requested = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? workspaceWidth
+        : current + (event.key === "ArrowRight" ? 24 : -24);
+    setEditorWidth(requested, workspaceWidth);
     window.setTimeout(() => theater?.resize(), 0);
   });
+  window.addEventListener("resize", syncWorkspaceResizerState);
 }
 
 function setEditorWidth(value, workspaceWidth) {
-  const min = Math.min(380, workspaceWidth * 0.42);
-  const max = Math.max(min, Math.min(760, workspaceWidth - 520));
+  const { min, max } = editorWidthBounds(workspaceWidth);
   const width = Math.round(Math.max(min, Math.min(max, value)));
+  updateWorkspaceEditorBounds(min, max);
   elements.workspace.style.setProperty("--editor-width", `${width}px`);
-  elements.workspaceResizer.setAttribute("aria-valuenow", String(width));
+  updateWorkspaceResizerAria(width, min, max);
   writeLocalStorage(LAYOUT_KEY, String(width));
+}
+
+function syncWorkspaceResizerState() {
+  if (window.innerWidth <= WORKSPACE_RESIZER_BREAKPOINT) return;
+  const workspaceWidth = elements.workspace.getBoundingClientRect().width;
+  const { min, max } = editorWidthBounds(workspaceWidth);
+  updateWorkspaceEditorBounds(min, max);
+  const editorWidth = document.querySelector(".editor-region")?.getBoundingClientRect().width || 420;
+  const width = Math.round(editorWidth);
+  updateWorkspaceResizerAria(width, min, max);
+}
+
+function editorWidthBounds(workspaceWidth) {
+  const min = Math.min(380, workspaceWidth * 0.42);
+  const max = Math.max(min, Math.min(720, workspaceWidth - 520));
+  return { min, max };
+}
+
+function updateWorkspaceEditorBounds(min, max) {
+  elements.workspace.style.setProperty("--editor-min-width", `${Math.round(min)}px`);
+  elements.workspace.style.setProperty("--editor-max-width", `${Math.round(max)}px`);
+}
+
+function updateWorkspaceResizerAria(width, min, max) {
+  elements.workspaceResizer.setAttribute("aria-valuemin", String(Math.round(min)));
+  elements.workspaceResizer.setAttribute("aria-valuemax", String(Math.round(max)));
+  elements.workspaceResizer.setAttribute("aria-valuenow", String(width));
+  elements.workspaceResizer.setAttribute("aria-valuetext", `${width} pixels`);
 }
 
 function applySavedLayout() {
@@ -1761,10 +2511,12 @@ function applySavedLayout() {
 }
 
 function activateTab(name) {
+  if (!["atlas", "fix", "inspect"].includes(name)) return;
   if (name !== "atlas") hideAtlasEvidencePopover();
   for (const tab of elements.tabs) {
     const selected = tab.id === `tab-${name}`;
     tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
   }
 
   for (const panel of elements.panels) {
@@ -1774,7 +2526,11 @@ function activateTab(name) {
   }
 
   if (name === "atlas") {
-    theater?.resize();
+    const visibleNodeIds = theater?.visibleNodeIds() ?? [];
+    if (currentAnalysis && !visibleNodeIds.includes(selectedTargetId)) {
+      renderTheater(currentAnalysis, { announceReconciliation: true });
+    }
+    else theater?.resize();
   }
 }
 

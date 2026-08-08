@@ -1,7 +1,7 @@
 {
   "schemaVersion": "query-cartographer.pages-manifest.v1",
   "sourceRepository": "FlorianStuettgen/query-cartographer",
-  "sourceCommit": "86d81f0145e50486024e071cf067466ac397eb0a",
+  "sourceCommit": "724200e88d6dc9edfec1e26496bc2b278df8a243",
   "basePath": "/query-cartographer-pages/",
   "files": [
     {
@@ -16,13 +16,13 @@
     },
     {
       "path": "index.html",
-      "bytes": 13294,
-      "sha256": "7fe9029678b3904cd1242270da82d12e6309b3c93b94642b24949413a931e685"
+      "bytes": 15366,
+      "sha256": "e3b5640800dbfd658a9bd58d0365fe97e615bd9a8eb1de2342d0350b503edc0d"
     },
     {
       "path": "src/app.js",
-      "bytes": 72598,
-      "sha256": "fe35d97c51d3a3aa123e2f7467a036bd5ef7ad7c702806993e02e83dbfe9fd1a"
+      "bytes": 107970,
+      "sha256": "cf0a7df321ca055cc1b4b9173be81e9d2931fb4d2ca27afbbe541eb1e0446da5"
     },
     {
       "path": "src/export/browserExport.js",
@@ -36,8 +36,8 @@
     },
     {
       "path": "src/export/exportContract.js",
-      "bytes": 28895,
-      "sha256": "1461e298320951d83867cbcf185d7d33f627be543fa73b7a34bd2e69f3d51845"
+      "bytes": 28899,
+      "sha256": "2f3bdbe9dcb07842ff5c6e74088fa9d2207f478eddf84b210134db9072a1fcb6"
     },
     {
       "path": "src/export/markdownContract.js",
@@ -51,8 +51,8 @@
     },
     {
       "path": "src/sql/analyzer.js",
-      "bytes": 3902,
-      "sha256": "23f4e6fec5304362235fbd216e5e571a1f56fd1462cc1bc8517f998dccfc06ed"
+      "bytes": 3977,
+      "sha256": "fb6880efe86cbefb00db10eb7b456720e06b257f47d3c42373a0816fd47c6afd"
     },
     {
       "path": "src/sql/briefing.js",
@@ -86,13 +86,13 @@
     },
     {
       "path": "src/sql/formatter.js",
-      "bytes": 3058,
-      "sha256": "59b1e070a4eb34b95a1984fc026251861e0e7fafd47a260a6165d899000cdccc"
+      "bytes": 5686,
+      "sha256": "9843f1238ca02f55434cc296f1d52e196aa9945d244f4ba5deca48655623c449"
     },
     {
       "path": "src/sql/identity.js",
-      "bytes": 6481,
-      "sha256": "6461b21f3a178ee6a5f29f7a979a325fa2400984f4fdcd8caf56ea9ef48b9972"
+      "bytes": 6598,
+      "sha256": "aaad72d18c616bd837b4887b56e41c8dea8ea570d0f6255f64304e60bfb34261"
     },
     {
       "path": "src/sql/parser.js",
@@ -126,8 +126,8 @@
     },
     {
       "path": "src/styles.css",
-      "bytes": 56023,
-      "sha256": "4f78082b1b81e6e5407183a7bd1753e20a95d4c10c77ff8cb02c8a391a475624"
+      "bytes": 64014,
+      "sha256": "131d6d390f3a73516617f3c2d1940fb11dc29fcf6f2f4e580f190944f7a03c2d"
     },
     {
       "path": "src/ui/diagram.js",
@@ -136,13 +136,13 @@
     },
     {
       "path": "src/ui/theater.js",
-      "bytes": 27818,
-      "sha256": "71e6c6b7b8b56ecb03f5968aae09ae32136ca7aff7e8657b8300e5d4bda2e402"
+      "bytes": 28883,
+      "sha256": "4eec1d000d1f8818fbbe8e2428548dede80884c0f60c1ac486c9f665ffd15488"
     },
     {
       "path": "src/ui/trace.js",
-      "bytes": 2728,
-      "sha256": "6a956f25c5308830fc09f98730ea351330513e58aa087678dcd1173935e06910"
+      "bytes": 3478,
+      "sha256": "64629b958475ec9d56550d75a6a79bc821ad3ea23ec5085ad238081cbd4315d1"
     }
   ]
 }
